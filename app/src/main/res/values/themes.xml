@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.TrailSense" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F8F5EC</item>
+        <item name="android:navigationBarColor">#F8F5EC</item>
+    </style>
+</resources>

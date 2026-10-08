@@ -1,0 +1,68 @@
+# IDE and generated build/cache files
+*.iml
+.idea/
+.gradle/
+.kotlin/
+**/build/
+.cxx/
+.externalNativeBuild/
+.DS_Store
+/dist/
+/captures/
+
+# Local SDK configuration, credentials and signing material
+local.properties
+.env
+.env.*
+*.env
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+keystore.properties
+signing.properties
+*credentials*
+
+# Compiled artifacts; the Gradle wrapper JAR is intentionally retained
+*.[aA][pP][kK]
+*.[aA][aA][bB]
+
+# Private activity exports, databases, screenshots and diagnostics
+*.[tT][cC][xX]
+*.[gG][pP][xX]
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+/testreal/
+**/testreal/
+**/sleep*/
+**/diagnostics/
+**/screenshots/
+**/phone-report/
+*.jpg
+*.jpeg
+*.png
+*.webp
+# Allow legitimate packaged UI image assets
+!app/src/main/res/**/*.png
+!app/src/main/res/**/*.webp
+!app/src/main/res/**/*.jpg
+!app/src/main/res/**/*.jpeg
+
+# Existing private audit/planning material stays local
+/docs/
+
+# Tests tied to private activity metrics, fixture paths or sleep images
+/app/src/test/java/com/mayushi/trailsense/domain/RealHuaweiTcxTest.kt
+/app/src/test/java/com/mayushi/trailsense/domain/RealHuaweiDateTcxTest.kt
+/app/src/test/java/com/mayushi/trailsense/domain/RecordedHikeDateTest.kt
+/app/src/test/java/com/mayushi/trailsense/domain/Release034RegressionTest.kt
+/app/src/test/java/com/mayushi/trailsense/data/Release034RepositoryTest.kt
+/app/src/test/java/com/mayushi/trailsense/exchange/Release034ExchangeTest.kt
+/app/src/test/java/com/mayushi/trailsense/data/LargeTrackDatabaseTest.kt
+/app/src/test/java/com/mayushi/trailsense/network/AnalysisPayloadBuilderTest.kt
+/app/src/test/java/com/mayushi/trailsense/network/RichAnalysisPayloadTest.kt
