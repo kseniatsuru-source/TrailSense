@@ -7,7 +7,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 
 object TrackCodec {
-    private const val VERSION = 2
+    private const val VERSION = 3
     fun encode(points: List<TrackPoint>): String {
         val out = ByteArrayOutputStream()
         DataOutputStream(out).use { data ->
@@ -18,6 +18,7 @@ object TrackCodec {
                 data.writeBoolean(p.timeEpochMs != null); p.timeEpochMs?.let(data::writeLong)
                 data.writeBoolean(p.heartRateBpm != null); p.heartRateBpm?.let(data::writeInt)
                 data.writeBoolean(p.segmentStart); data.writeBoolean(p.inferred)
+                data.writeBoolean(p.watchDistanceM != null); p.watchDistanceM?.let(data::writeDouble)
             }
         }
         return Base64.getEncoder().encodeToString(out.toByteArray())
@@ -32,7 +33,7 @@ object TrackCodec {
             val ele = if (data.readBoolean()) data.readDouble() else null
             val time = if (data.readBoolean()) data.readLong() else null
             val hr = if (data.readBoolean()) data.readInt() else null
-            TrackPoint(lat, lon, ele, time, hr, if (version >= 2) data.readBoolean() else false, if (version >= 2) data.readBoolean() else false)
+            TrackPoint(lat, lon, ele, time, hr, if (version >= 2) data.readBoolean() else false, if (version >= 2) data.readBoolean() else false, if (version >= 3 && data.readBoolean()) data.readDouble() else null)
         }
     }
 }

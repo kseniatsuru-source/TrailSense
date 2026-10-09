@@ -131,9 +131,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         onSaved: () -> Unit = {},
     ) = launchBusy {
         HikeAnnotations.validate(activity.customRatings, activity.pointsOfInterest)
-        app.repository.saveRouteQuestionnaire(route)
-        app.repository.saveQuestionnaire(activity.copy(questionnaireCompletedAt = System.currentTimeMillis()), companionIds)
-        app.repository.savePaceSegments(activity.id, paceSegments)
+        app.repository.saveQuestionnaire(activity.copy(questionnaireCompletedAt = System.currentTimeMillis()), companionIds, route)
         _message.value = "Анкета сохранена и свёрнута"
         onSaved()
         if (app.preferences.postHikeAutoAnalysis) requestRouteAnalysis(route.id, "DEEP_ROUTE")
@@ -149,6 +147,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun inferMissingTrackStart(activityId: Long, joinIndex: Int? = null) = launchBusy {
         app.repository.inferMissingOutAndBackStart(activityId, joinIndex)
         _message.value = "Начало восстановлено по обратному участку; все показатели пересчитаны"
+    }
+    fun recoverAlongTrails(activityId: Long, route: List<TrackPoint>) = launchBusy {
+        app.repository.recoverAlongTrails(activityId, route)
+        _message.value = "Добавлена оценка начала по тропам OSM; исходная запись сохранена"
     }
     fun setHeavyBackpack(activityId: Long, enabled: Boolean) = launchBusy {
         app.repository.setHeavyBackpack(activityId, enabled)

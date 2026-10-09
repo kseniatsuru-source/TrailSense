@@ -8,6 +8,7 @@ data class TrackPoint(
     val heartRateBpm: Int? = null,
     val segmentStart: Boolean = false,
     val inferred: Boolean = false,
+    val watchDistanceM: Double? = null,
 )
 
 data class TrackSegment(

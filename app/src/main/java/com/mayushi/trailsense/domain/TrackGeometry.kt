@@ -2,7 +2,7 @@ package com.mayushi.trailsense.domain
 
 object TrackGeometry {
     /** Explicit segment or timed outage; never draw/count an invented straight connector. */
-    fun disconnected(a: TrackPoint, b: TrackPoint): Boolean = b.segmentStart ||
+    fun disconnected(a: TrackPoint, b: TrackPoint): Boolean = b.segmentStart || (a.inferred != b.inferred) ||
         (a.timeEpochMs != null && b.timeEpochMs != null && b.timeEpochMs - a.timeEpochMs > 300_000)
     fun cumulative(points: List<TrackPoint>): DoubleArray {
         val result = DoubleArray(points.size)

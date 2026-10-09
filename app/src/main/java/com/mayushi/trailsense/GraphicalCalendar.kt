@@ -31,6 +31,7 @@ fun GraphicalMonthCalendar(
     contexts: List<CalendarContextEntity>,
     pillPlan: PillPlanEntity?,
     pillEvents: List<com.mayushi.trailsense.data.PillEventEntity> = emptyList(),
+    hikeDays: Set<Long> = emptySet(),
     previousMonth: () -> Unit,
     nextMonth: () -> Unit,
     showToday: () -> Unit,
@@ -69,6 +70,7 @@ fun GraphicalMonthCalendar(
                             date = cell.date,
                             inDisplayedMonth = cell.inDisplayedMonth,
                             isToday = cell.date == today,
+                            hasHike = cell.date.toEpochDay() in hikeDays,
                             contextTypes = CalendarMonthGrid.contextTypes(cell.date, contexts),
                             fact = pillEvents.lastOrNull { it.epochDay == cell.date.toEpochDay() },
                             pillPhase = pillPlan?.let {
@@ -90,6 +92,7 @@ private fun CalendarDay(
     date: LocalDate,
     inDisplayedMonth: Boolean,
     isToday: Boolean,
+    hasHike: Boolean = false,
     contextTypes: List<String>,
     pillPhase: PillPhase?,
     fact: com.mayushi.trailsense.data.PillEventEntity? = null,
@@ -120,6 +123,7 @@ private fun CalendarDay(
                 color = if (inDisplayedMonth) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f),
             )
             fact?.let { Text(if (it.actualTaken == true) "✓" else if (it.actualTaken == false) "×" else "↔", style = MaterialTheme.typography.labelSmall, color = Coral) }
+            if (hasHike) Text("▲", color = Forest, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 contextTypes.take(3).forEach { type ->
@@ -146,9 +150,10 @@ private fun CalendarDay(
 private fun CalendarLegend(showPillPlan: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         LegendItem(contextColor("NOTE"), "Заметка")
+        LegendItem(Forest, "▲ Поход")
         LegendItem(contextColor("SEVERE_SLEEP_DEBT"), "Сильный недосып")
         LegendItem(contextColor("HIGH_STRESS"), "Сильный стресс")
-        if (showPillPlan) Text("Полоска — план (зелёная: активные, персиковая: перерыв). ✓ принято · × не принято · ↔ отклонение", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (showPillPlan) Text("Полоска — план (зелёная: активные, бирюзовая: перерыв). ✓ принято · × не принято · ↔ отклонение", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

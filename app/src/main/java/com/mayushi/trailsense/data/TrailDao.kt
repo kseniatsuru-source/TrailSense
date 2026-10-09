@@ -125,6 +125,11 @@ interface TrailDao {
 
     @Query("SELECT * FROM pace_segments WHERE activityId=:activityId ORDER BY startFraction, endFraction")
     fun observePaceSegments(activityId: Long): Flow<List<PaceSegmentEntity>>
+    @Transaction
+    suspend fun saveUnifiedQuestionnaire(route: RouteEntity, activity: ActivityEntity, companionIds: Set<Long>) {
+        updateActivityWithCompanions(activity, companionIds)
+        updateRouteAndInvalidate(route)
+    }
     @Query("SELECT * FROM pace_segments WHERE activityId=:activityId ORDER BY startFraction, endFraction")
     suspend fun paceSegments(activityId: Long): List<PaceSegmentEntity>
     @Query("DELETE FROM pace_segments WHERE activityId=:activityId") suspend fun clearPaceSegments(activityId: Long)

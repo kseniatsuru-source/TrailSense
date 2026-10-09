@@ -28,7 +28,11 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 @Composable
-fun ContextCalendarScreen(vm: AppViewModel) {
+fun ContextCalendarScreen(vm: AppViewModel, openHike: (Long) -> Unit = {}) {
+    val activities by vm.activities.collectAsStateWithLifecycle()
+    val routes by vm.routes.collectAsStateWithLifecycle()
+    val hikesByDay = remember(activities) { activities.filter { it.routeId != null && (it.manualDateEpochDay != null || it.startedAt != null) }.groupBy { it.manualDateEpochDay ?: java.time.Instant.ofEpochMilli(it.startedAt!!).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay() } }
+    var showDay by remember { mutableStateOf(false) }
     val planEntity by vm.pillPlan.collectAsStateWithLifecycle()
     val contexts by vm.calendarContexts.collectAsStateWithLifecycle()
     val pillEvents by vm.pillEvents.collectAsStateWithLifecycle()
@@ -65,13 +69,14 @@ fun ContextCalendarScreen(vm: AppViewModel) {
                 contexts = contexts,
                 pillPlan = planEntity,
                 pillEvents = pillEvents,
+                hikeDays = hikesByDay.keys,
                 previousMonth = { displayedMonth = displayedMonth.minusMonths(1) },
                 nextMonth = { displayedMonth = displayedMonth.plusMonths(1) },
                 showToday = { displayedMonth = YearMonth.from(today); selectedDate = today },
                 selectDay = { date ->
                     selectedDate = date
                     displayedMonth = YearMonth.from(date)
-                    showContextDialog = true
+                    showDay = true
                 },
             )
         }
@@ -118,6 +123,17 @@ fun ContextCalendarScreen(vm: AppViewModel) {
         }
     }
 
+    if (showDay) AlertDialog(onDismissRequest = { showDay = false }, title = { Text(selectedDate.toString()) }, text = {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            hikesByDay[selectedDate.toEpochDay()].orEmpty().forEach { hike ->
+                TextButton(onClick = { showDay = false; openHike(hike.routeId!!) }) { Text(routes.firstOrNull { it.id == hike.routeId }?.title ?: hike.title) }
+            }
+            contexts.filter { selectedDate.toEpochDay() in it.startEpochDay..it.endEpochDay }.forEach { Text(calendarContextLabel(it.type) + ": " + it.note) }
+            pillEvents.filter { it.epochDay == selectedDate.toEpochDay() }.forEach { Text("Факт: " + (it.actualTaken?.let { taken -> if (taken) "принята" else "не принята" } ?: it.type)) }
+            planEntity?.let { Text("План: " + PillSchedule.day(PillPlan(it.anchorEpochDay,it.activeDays,it.breakDays),selectedDate).phase.name) }
+            TextButton(onClick = { showDay = false; showContextDialog = true }) { Text("Добавить запись контекста") }
+        }
+    }, confirmButton = { TextButton(onClick = { showDay = false }) { Text("Закрыть") } })
     if (showDeviation) DeviationDialog(onDismiss = { showDeviation = false }) { planned, actual, policy, note -> vm.logPillDeviation(planned, actual, "BOUNDARY", policy, note); showDeviation = false }
     if (showContextDialog) CalendarContextDialog(
         initialDate = selectedDate,

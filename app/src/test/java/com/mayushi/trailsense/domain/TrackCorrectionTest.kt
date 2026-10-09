@@ -17,10 +17,11 @@ class TrackCorrectionTest {
 
         val corrected = TrackCorrection.inferMissingOutAndBackStart(points, maxJoinDistanceM = 5.0)
 
-        assertEquals(7, corrected.size)
+        assertEquals(8, corrected.size)
         assertEquals(-123.0, corrected.first().longitude, 0.000001)
-        assertEquals(0L, corrected.first().timeEpochMs)
-        assertEquals(1_000L, corrected[1].timeEpochMs)
+        assertEquals(null, corrected.first().timeEpochMs)
+        assertEquals(null, corrected[1].timeEpochMs)
+        assertEquals(points, corrected.drop(2))
         assertEquals(-123.0, corrected.last().longitude, 0.000001)
         assertTrue(TrackAnalyzer.analyze(corrected).distanceM > TrackAnalyzer.analyze(points).distanceM)
     }

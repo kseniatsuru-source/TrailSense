@@ -65,12 +65,16 @@ fun TopographicTrackMap(
     highlightedRange: ClosedFloatingPointRange<Float>? = null,
     mapHeight: Dp = 260.dp,
     pois: List<com.mayushi.trailsense.domain.HikeAnnotations.Poi> = emptyList(),
+    distanceM: Double? = null,
+    onPointSelected: ((TrackPoint) -> Unit)? = null,
+    selectedPoint: TrackPoint? = null,
 ) {
     if (points.size < 2) return
     val context = LocalContext.current
     val map = remember { TrackMapView(context).apply {
         setTileSource(TileSourceFactory.OpenTopo)
         setMultiTouchControls(false)
+        zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
         controller.setZoom(13.0)
     } }
     DisposableEffect(map) {
@@ -78,30 +82,39 @@ fun TopographicTrackMap(
         onDispose { map.onPause(); map.onDetach() }
     }
     var fitted by remember { mutableStateOf(false) }
-    LaunchedEffect(points, highlightedRange, pois) {
+    LaunchedEffect(points, highlightedRange, pois, distanceM, selectedPoint) {
         map.overlays.clear()
-        TrackGeometry.split(points).filter { it.size >= 2 }.forEach { segment ->
+        TrackGeometry.split(points).filter { it.size >= 2 }.sortedBy { it.first().inferred }.forEach { segment ->
             map.overlays += Polyline().apply {
                 setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                outlinePaint.color = if (highlightedRange != null) AndroidColor.rgb(110,120,130) else if (segment.first().inferred) AndroidColor.rgb(25,150,70) else AndroidColor.rgb(0,105,220)
-                outlinePaint.strokeWidth = 8f
+                outlinePaint.color = if (highlightedRange != null) AndroidColor.rgb(110,120,130) else if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(190,45,220)
+                outlinePaint.strokeWidth = if (segment.first().inferred) 15f else 8f
+                if (segment.first().inferred) outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f,12f),0f)
             }
         }
         highlightedRange?.let { range ->
-            val cumulative = TrackGeometry.cumulative(points)
+            val cumulative = com.mayushi.trailsense.domain.TrackDistanceAxis.build(points, distanceM).meters
             val start = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * range.start).coerceIn(0, points.lastIndex - 1)
             val end = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * range.endInclusive).coerceIn(start + 1, points.lastIndex)
-            TrackGeometry.split(points.subList(start,end+1)).filter { it.size >= 2 }.forEach { segment ->
+            TrackGeometry.split(points.subList(start,end+1)).filter { it.size >= 2 }.sortedBy { it.first().inferred }.forEach { segment ->
                 map.overlays += Polyline().apply {
                     setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                    outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(25,150,70) else AndroidColor.rgb(0,105,220)
-                    outlinePaint.strokeWidth = 12f
+                    outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(190,45,220)
+                    outlinePaint.strokeWidth = if (segment.first().inferred) 18f else 12f
+                    if (segment.first().inferred) outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f,12f),0f)
                 }
             }
         }
         pois.forEach { poi -> map.overlays += org.osmdroid.views.overlay.Marker(map).apply {
             position = GeoPoint(poi.latitude,poi.longitude); title = poi.name; setAnchor(.5f,1f)
         } }
+        selectedPoint?.let { p -> map.overlays += org.osmdroid.views.overlay.Marker(map).apply {
+            position = GeoPoint(p.latitude,p.longitude); title = "Пропущенный старт"; setAnchor(.5f,1f)
+        } }
+        onPointSelected?.let { select -> map.overlays += org.osmdroid.views.overlay.MapEventsOverlay(object : org.osmdroid.events.MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { select(TrackPoint(p.latitude,p.longitude)); return true }
+            override fun longPressHelper(p: GeoPoint): Boolean = false
+        }) }
         val north = points.maxOf { it.latitude }
         val south = points.minOf { it.latitude }
         val east = points.maxOf { it.longitude }
@@ -126,7 +139,7 @@ fun TopographicTrackMap(
             )
         }
         Text(
-            (if (points.any { it.inferred }) "Синий — запись · зелёный — оценка. " else if (highlightedRange != null) "Синий — оставить · серый — убрать. " else "") + "© OpenStreetMap contributors · OpenTopoMap (CC-BY-SA)",
+            "© OpenStreetMap contributors · OpenTopoMap (CC-BY-SA)",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -134,8 +147,8 @@ fun TopographicTrackMap(
 }
 
 @Composable
-fun ElevationProfile(points: List<TrackPoint>, modifier: Modifier = Modifier) {
-    val cumulative = remember(points) { TrackGeometry.cumulative(points) }
+fun ElevationProfile(points: List<TrackPoint>, modifier: Modifier = Modifier, distanceM: Double? = null) {
+    val cumulative = remember(points, distanceM) { com.mayushi.trailsense.domain.TrackDistanceAxis.build(points, distanceM).meters }
     val elevations = points.mapNotNull { it.elevationM }
     if (elevations.size < 2) return
     val min = elevations.min()
@@ -160,11 +173,11 @@ fun ElevationProfile(points: List<TrackPoint>, modifier: Modifier = Modifier) {
                 val a=position(index-1); val b=position(index)
                 target.moveTo(a.x,a.y); target.lineTo(b.x,b.y)
             }
-            drawPath(path, color = androidx.compose.ui.graphics.Color(0xFF2389FF), style = Stroke(width = 4f))
+            drawPath(path, color = androidx.compose.ui.graphics.Color(0xFFBE2DDC), style = Stroke(width = 4f))
             drawPath(inferredPath, color = androidx.compose.ui.graphics.Color(0xFF29BE68), style = Stroke(width = 4f))
             drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), 1f)
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("0 км"); Text("%.2f км по GPS".format(cumulative.last()/1000.0)) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("0 км"); Text("%.2f км".format(cumulative.last()/1000.0)) }
     }
 }
 

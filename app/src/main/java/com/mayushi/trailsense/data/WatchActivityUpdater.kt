@@ -38,7 +38,7 @@ object WatchActivityUpdater {
                 averageHeartRateBpm = metrics.averageHeartRateBpm,
                 maxHeartRateBpm = metrics.maxHeartRateBpm,
                 matchConfidence = 1.0,
-                comment = watchComment,
+                comment = "",
                 createdAt = now,
                 updatedAt = now,
             )

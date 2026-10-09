@@ -4,13 +4,13 @@ import kotlin.math.roundToInt
 
 /** Non-destructive track transformations. Callers should always feed the original watch track. */
 object TrackCorrection {
-    fun trim(points: List<TrackPoint>, startFraction: Double, endFraction: Double): List<TrackPoint> {
+    fun trim(points: List<TrackPoint>, startFraction: Double, endFraction: Double, recordedDistanceM: Double? = null): List<TrackPoint> {
         require(points.size >= 2) { "Трек слишком короткий для обрезки" }
         require(startFraction in 0.0..1.0 && endFraction in 0.0..1.0 && endFraction > startFraction) {
             "Некорректные границы трека"
         }
         val last = points.lastIndex
-        val cumulative = TrackGeometry.cumulative(points)
+        val cumulative = TrackDistanceAxis.build(points, recordedDistanceM).meters
         val start = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * startFraction).coerceIn(0, last - 1)
         val end = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * endFraction).coerceIn(start + 1, last)
         return points.subList(start, end + 1).toList()
@@ -29,7 +29,7 @@ object TrackCorrection {
             ?: throw IllegalArgumentException("Не удалось найти обратный участок возле точки старта записи")
         val joinDistance = Geo.distanceM(first, points[joinIndex])
         require(joinDistance <= maxJoinDistanceM) {
-            "Трек не возвращается к месту, где была включена запись; безопасно восстановить начало нельзя"
+            "Точка возврата дальше 150 м от начала записи. Передвинь её ближе или выбери настоящий пропущенный старт на карте."
         }
         require(joinIndex < points.lastIndex) { "После точки возврата нет участка для восстановления" }
 
@@ -40,8 +40,8 @@ object TrackCorrection {
             val inferredTime = if (recordedStart != null && joinTime != null && endTime != null && source.timeEpochMs != null) {
                 recordedStart - (source.timeEpochMs - joinTime)
             } else null
-            source.copy(timeEpochMs = inferredTime, heartRateBpm = null, inferred = true, segmentStart = false)
+            source.copy(timeEpochMs = null, heartRateBpm = null, inferred = true, segmentStart = false, watchDistanceM = null)
         }
-        return mirrored.dropLast(1) + points
+        return mirrored + points
     }
 }

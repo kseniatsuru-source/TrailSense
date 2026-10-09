@@ -117,6 +117,7 @@ object TrackParser {
         private var currentEle: Double? = null
         private var currentTime: Long? = null
         private var currentHr: Int? = null
+        private var currentDistance: Double? = null
         private var inTrackName = false
         private var summaryDistanceM: Double? = null
         private var summaryElevationGainM: Double? = null
@@ -191,6 +192,7 @@ object TrackParser {
             }
             if (inPoint) when (tag) {
                 "latitudedegrees" -> currentLat = value.toDoubleOrNull()
+                "distancemeters" -> currentDistance = value.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
                 "longitudedegrees" -> currentLon = value.toDoubleOrNull()
                 "ele", "altitudemeters" -> currentEle = value.toDoubleOrNull()
                 "time" -> {
@@ -204,10 +206,11 @@ object TrackParser {
                 val lat = currentLat; val lon = currentLon
                 if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
                     if (firstPointTime == null) firstPointTime = currentTime
-                    points += TrackPoint(lat, lon, currentEle, currentTime, currentHr, segmentStart = nextSegmentStart)
+                    points += TrackPoint(lat, lon, currentEle, currentTime, currentHr, segmentStart = nextSegmentStart, watchDistanceM = currentDistance)
                     nextSegmentStart = false
                 }
                 inPoint = false; currentLat = null; currentLon = null; currentEle = null; currentTime = null; currentHr = null
+                currentDistance = null
             }
             if (elementStack.lastOrNull() == tag) elementStack.removeLast()
             text = StringBuilder()

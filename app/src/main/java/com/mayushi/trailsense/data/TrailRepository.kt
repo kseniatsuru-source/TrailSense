@@ -203,7 +203,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         ))
     }
 
-    suspend fun saveQuestionnaire(form: ActivityEntity, companionIds: Set<Long>) = serializedWrite {
+    suspend fun saveQuestionnaire(form: ActivityEntity, companionIds: Set<Long>, routeForm: RouteEntity? = null) = serializedWrite {
         val current = dao.activity(form.id) ?: error("Поход не найден")
         HikeAnnotations.validate(form.customRatings, form.pointsOfInterest)
         val merged = current.copy(
@@ -226,7 +226,13 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
             comment = form.comment,
             updatedAt = maxOf(System.currentTimeMillis(), current.updatedAt + 1),
         )
-        dao.updateActivityWithCompanions(merged, companionIds)
+        if (routeForm == null) dao.updateActivityWithCompanions(merged, companionIds)
+        else {
+            val currentRoute = dao.route(routeForm.id) ?: error("Маршрут не найден")
+            dao.saveUnifiedQuestionnaire(currentRoute.copy(overallDifficulty = routeForm.overallDifficulty, climbDifficulty = routeForm.climbDifficulty,
+                technicality = routeForm.technicality, exposure = routeForm.exposure, beauty = routeForm.beauty, notes = "",
+                updatedAt = maxOf(System.currentTimeMillis(),currentRoute.updatedAt+1)), merged.copy(comment = HikeComments.merge(form.comment,routeForm.notes)), companionIds)
+        }
     }
 
     suspend fun savePaceSegments(activityId: Long, segments: List<PaceSegmentEntity>) = serializedWrite {
@@ -244,8 +250,13 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
 
     suspend fun trimActivityTrack(activityId: Long, startFraction: Double, endFraction: Double) = serializedWrite {
         val activity = dao.activity(activityId) ?: error("Поход не найден")
-        val original = TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
-        updateCorrectedTrack(activity, TrackCorrection.trim(original, startFraction, endFraction), "TRIM", "Оставлено %.2f–%.2f км по GPS".format(TrackGeometry.cumulative(original).last() * startFraction / 1000, TrackGeometry.cumulative(original).last() * endFraction / 1000))
+        val baseline = TrackCodec.decode(activity.trackEncoded)
+        val inferredDistance = baseline.filter { it.inferred }.takeIf { it.size >= 2 }?.let { TrackGeometry.cumulative(it).last() } ?: 0.0
+        val distance = (activity.distanceM - inferredDistance).coerceAtLeast(0.0)
+        val axis = TrackDistanceAxis.build(baseline, distance)
+        val selected = TrackCorrection.trim(baseline, startFraction, endFraction, distance)
+        val first = baseline.indexOf(selected.first()); val last = baseline.indexOf(selected.last())
+        updateCorrectedTrack(activity, selected, "TRIM", axis.provenance + ". Высоты и время выбранных записанных участков рассчитаны по сохранённым точкам; восстановленные участки остаются оценкой.", axis.meters[last]-axis.meters[first])
     }
 
     suspend fun inferMissingOutAndBackStart(activityId: Long, joinIndex: Int? = null) = serializedWrite {
@@ -260,7 +271,14 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         updateCorrectedTrack(activity, original, "NONE", "")
     }
 
-    private suspend fun updateCorrectedTrack(activity: ActivityEntity, points: List<TrackPoint>, mode: String, note: String) {
+    suspend fun recoverAlongTrails(activityId: Long, route: List<TrackPoint>) = serializedWrite {
+        val activity = dao.activity(activityId) ?: error("Поход не найден")
+        val original = TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
+        require(route.size >= 2 && route.all { it.inferred }) { "Нет маршрута OSM для восстановления" }
+        val estimate = RecoveryEstimator.estimate(route,original)
+        updateCorrectedTrack(activity, estimate.points + original, "INFERRED_START", RecoveryEstimator.summary(estimate) + "\nИсточник геометрии: OSM © contributors, ODbL. Высота только с совпадающей записи; время по сходным уклонам этого же похода. Проходимость не проверена.")
+    }
+    private suspend fun updateCorrectedTrack(activity: ActivityEntity, points: List<TrackPoint>, mode: String, note: String, cutDistanceM: Double? = null) {
         val calculated = TrackAnalyzer.analyze(points)
         val originalMetrics = activity.originalMetricsJson?.let(OriginalWatchMetrics::decode)
         require(mode != "NONE" || originalMetrics != null) { "Исходные числа часов старой коррекции неизвестны. Повторно импортируй оригинальный файл." }
@@ -269,16 +287,23 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
             mode == "NONE" -> originalMetrics!!
             mode == "INFERRED_START" && originalMetrics != null -> {
                 val addedCount = points.size - original.size
-                val added = TrackAnalyzer.analyze(points.take(addedCount + 1))
-                val elapsed = originalMetrics.elapsedSeconds?.let { it + (added.elapsedSeconds ?: 0) }
-                val moving = originalMetrics.movingSeconds?.let { it + (added.movingSeconds ?: 0) }
+                val added = RecoveryEstimator.estimate(points.take(addedCount), original)
+                val elapsed = originalMetrics.elapsedSeconds?.let { actual -> added.seconds?.let { actual + it } }
+                val moving = originalMetrics.movingSeconds?.let { actual -> added.seconds?.let { actual + it } }
                 val distance = originalMetrics.distanceM + added.distanceM
                 originalMetrics.copy(distanceM = distance,
-                    elevationGainM = originalMetrics.elevationGainM + added.elevationGainM,
-                    elevationLossM = originalMetrics.elevationLossM + added.elevationLossM,
+                    elevationGainM = originalMetrics.elevationGainM + (added.gainM ?: 0.0),
+                    elevationLossM = originalMetrics.elevationLossM + (added.lossM ?: 0.0),
                     elapsedSeconds = elapsed, movingSeconds = moving,
                     stoppedSeconds = if (elapsed != null && moving != null) elapsed - moving else null,
                     averagePaceMinutesPerKm = moving?.let { it / 60.0 / (distance / 1000.0) })
+            }
+            mode == "TRIM" && originalMetrics != null -> {
+                val axis = TrackDistanceAxis.build(original, originalMetrics.distanceM).meters
+                val first = original.indexOf(points.first()).coerceAtLeast(0)
+                val last = original.indexOf(points.last()).coerceAtLeast(first)
+                val distance = cutDistanceM ?: (axis[last] - axis[first])
+                calculated.copy(distanceM = distance, averagePaceMinutesPerKm = calculated.movingSeconds?.let { it / 60.0 / (distance / 1000.0) })
             }
             else -> calculated
         }

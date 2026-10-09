@@ -71,6 +71,6 @@ class WatchActivityUpdaterTest {
         assertEquals(0L, created.id)
         assertEquals(7L, created.routeId)
         assertEquals(90.0, created.elevationLossM, 0.01)
-        assertTrue(created.comment.contains("спуск"))
+        assertEquals("", created.comment)
     }
 }

@@ -48,7 +48,13 @@ import kotlin.math.roundToInt
 class MainActivity : ComponentActivity() {
     private val incomingIntent = mutableStateOf<Intent?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); enableEdgeToEdge(); incomingIntent.value = intent
+        super.onCreate(savedInstanceState)
+        // The app always uses a dark palette, independent of the system theme.
+        enableEdgeToEdge(
+            statusBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = androidx.activity.SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
+        incomingIntent.value = intent
         setContent { TrailSenseTheme { TrailSenseApp(initialIntent = incomingIntent.value) } }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); incomingIntent.value = intent }
@@ -58,7 +64,7 @@ private val Night = Color(0xFF0D1511)
 private val NightSurface = Color(0xFF15211A)
 private val NightSurfaceRaised = Color(0xFF203027)
 private val Mint = Color(0xFFA4D8B8)
-private val Peach = Color(0xFFF0AD91)
+private val Peach = Color(0xFF64D8D0)
 val Forest = Mint
 val Coral = Peach
 private val NightText = Color(0xFFE4ECE6)
@@ -71,9 +77,9 @@ private val NightText = Color(0xFFE4ECE6)
             primaryContainer = Color(0xFF264D37),
             onPrimaryContainer = Color(0xFFD0F1DA),
             secondary = Peach,
-            onSecondary = Color(0xFF4B1F12),
-            secondaryContainer = Color(0xFF653324),
-            onSecondaryContainer = Color(0xFFFFDBCE),
+            onSecondary = Color(0xFF073B3A),
+            secondaryContainer = Color(0xFF164D4B),
+            onSecondaryContainer = Color(0xFFB9F5EF),
             background = Night,
             onBackground = NightText,
             surface = NightSurface,
@@ -99,6 +105,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
     var routeEditRequested by rememberSaveable { mutableStateOf(false) }
     var routeMenu by remember { mutableStateOf(false) }
     var deleteRequested by remember { mutableStateOf(false) }
+    var analysisChoice by remember { mutableStateOf(false) }
     var navigationHistory by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.listSaver<List<Pair<Tab,Long?>>,String>(
         save = { history -> history.map { "${it.first.name}:${it.second ?: ""}" } },
         restore = { values -> values.map { value -> val parts=value.split(":"); Tab.valueOf(parts[0]) to parts[1].toLongOrNull() } }
@@ -136,6 +143,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
     LaunchedEffect(message) { message?.let { snackbar.showSnackbar(it); vm.clearMessage() } }
 
     sharedFile?.let { AttachSharedFileDialog(it, routes, vm) }
+    if (analysisChoice && routeId != null) HikeAnalysisChoice(routeId!!, vm) { analysisChoice = false }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -151,7 +159,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
                             IconButton(onClick = { routeMenu = true }) { Icon(Icons.Default.MoreVert, "Меню хайка") }
                             DropdownMenu(expanded = routeMenu, onDismissRequest = { routeMenu = false }) {
                                 DropdownMenuItem(text = { Text("Изменить") }, onClick = { routeMenu = false; routeEditRequested = true })
-                                DropdownMenuItem(text = { Text("Отправить на анализ") }, onClick = { routeMenu = false; routeId?.let { vm.sendCurrentHike(context, it) } })
+                                DropdownMenuItem(text = { Text("Отправить на анализ") }, onClick = { routeMenu = false; analysisChoice = true })
                                 DropdownMenuItem(text = { Text("Удалить хайк") }, onClick = { routeMenu = false; deleteRequested = true })
                             }
                         }
@@ -183,7 +191,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
                 routeId != null -> key(routeId) { RouteEventDetail(routeId!!, vm, goBack, routeEditRequested, { routeEditRequested = false }, deleteRequested, { deleteRequested = false }) }
                 else -> when (tab) {
                     Tab.HOME -> EventsScreen(vm, openRoute)
-                    Tab.CALENDAR -> ContextCalendarScreen(vm)
+                    Tab.CALENDAR -> ContextCalendarScreen(vm, openRoute)
                     Tab.SETTINGS -> CurrentSettingsScreen(vm)
                 }
             }
@@ -418,7 +426,8 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
 @Composable fun NumberTextField(label: String, value: Double?, set: (Double?) -> Unit) { OutlinedTextField(value?.toString() ?: "", { set(it.replace(',', '.').toDoubleOrNull()) }, Modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true) }
 @Composable fun SwitchRow(label: String, checked: Boolean, set: (Boolean) -> Unit) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Switch(checked, set) } }
 @Composable fun <T> TriChoice(label: String, choices: List<Pair<String,T>>, selected: T?, set: (T) -> Unit) { Column { Text(label); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { choices.forEach { (name, v) -> FilterChip(selected == v, { set(v) }, { Text(name) }) } } } }
-@Composable fun ChoiceChips(choices: List<Pair<String,String>>, selected: String, set: (String) -> Unit) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) { choices.forEach { (name, v) -> FilterChip(selected == v, { set(v) }, { Text(name, style = MaterialTheme.typography.labelSmall) }) } } }
+@OptIn(ExperimentalLayoutApi::class)
+@Composable fun ChoiceChips(choices: List<Pair<String,String>>, selected: String, set: (String) -> Unit) { FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) { choices.forEach { (name, v) -> FilterChip(selected == v, { set(v) }, { Text(name, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }) } } }
 @Composable fun RouteChoice(routes: List<RouteEntity>, selectedId: Long?, set: (Long?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val selected = routes.firstOrNull { it.id == selectedId }

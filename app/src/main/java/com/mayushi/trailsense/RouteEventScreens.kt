@@ -41,6 +41,7 @@ private val watchFileTypes = arrayOf(
     "text/xml",
     "application/octet-stream",
 )
+const val HIKE_LONG_PRESS_MS = 1200L
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -83,7 +84,10 @@ fun EventsScreen(vm: AppViewModel, open: (Long) -> Unit) {
                 watch?.elevationGainM,
                 watch?.elevationLossM,
             )
-            Card(Modifier.fillMaxWidth().combinedClickable(onClick = { open(route.id) }, onLongClick = { deleteTarget = route; confirmDelete = false })) {
+            val baseConfiguration = androidx.compose.ui.platform.LocalViewConfiguration.current
+            val slowConfiguration = remember(baseConfiguration) { object : androidx.compose.ui.platform.ViewConfiguration by baseConfiguration { override val longPressTimeoutMillis: Long = HIKE_LONG_PRESS_MS } }
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalViewConfiguration provides slowConfiguration) {
+            Card(Modifier.fillMaxWidth().combinedClickable(onClick = { open(route.id) }, onLongClickLabel = "Действия с хайком", onLongClick = { deleteTarget = route; confirmDelete = false })) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -127,6 +131,7 @@ fun EventsScreen(vm: AppViewModel, open: (Long) -> Unit) {
         }
     }
 
+    }
     deleteTarget?.let { target ->
         if (!confirmDelete) AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text(target.title) },
             confirmButton = { TextButton(onClick = { confirmDelete = true }) { Text("Удалить хайк") } },
@@ -237,6 +242,7 @@ fun RouteEventDetail(
     var showEditDialog by remember { mutableStateOf(false) }
     var showTrackTools by remember { mutableStateOf(false) }
     var searchRoute by remember { mutableStateOf(false) }
+    var showAnalysisChoice by remember { mutableStateOf(false) }
     val pickWatch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importWatchFile(id, it) } }
     val context = LocalContext.current
     LaunchedEffect(deleteRequested) { if (deleteRequested) { showDeleteConfirmation = true; onDeleteRequestConsumed() } }
@@ -265,17 +271,18 @@ fun RouteEventDetail(
             val points = remember(watchActivity.trackEncoded) { TrackCodec.decode(watchActivity.trackEncoded) }
             if (points.size >= 2) {
                 TopographicTrackMap(points, Modifier.fillMaxWidth(), mapHeight = 260.dp, pois = remember(watchActivity.pointsOfInterest) { runCatching { com.mayushi.trailsense.domain.HikeAnnotations.pois(watchActivity.pointsOfInterest) }.getOrDefault(emptyList()) })
-                ElevationProfile(points, Modifier.fillMaxWidth())
+                ElevationProfile(points, Modifier.fillMaxWidth(), displayedRecordedDistance(watchActivity,points))
             }
             FlowMetrics(watchActivity)
             ManualHikeDate(watchActivity, vm)
             if (watchActivity.trackCorrectionMode == "INFERRED_START") watchActivity.originalMetricsJson?.let { snapshot ->
                 var aboutRecovery by remember { mutableStateOf(false) }
+                Text(watchActivity.trackCorrectionNote.substringBefore("\n"), color = Forest)
                 TextButton(onClick = { aboutRecovery = !aboutRecovery }) { Text("О восстановлении") }
                 if (aboutRecovery) {
                 val recorded = com.mayushi.trailsense.data.OriginalWatchMetrics.decode(snapshot)
                 Text("Записано часами: ${km(recorded.distanceM)} · +${recorded.elevationGainM.roundToInt()} м · −${recorded.elevationLossM.roundToInt()} м · ${recorded.elapsedSeconds?.let(::duration) ?: "—"}")
-                Text("Добавлено приблизительно: ${km(watchActivity.distanceM-recorded.distanceM)} · +${(watchActivity.elevationGainM-recorded.elevationGainM).roundToInt()} м · итог выше — запись + оценка", color = Coral)
+                Text("Итог: запись + известная часть оценки; неизвестный набор и время не подставляются.", color = Coral)
                 Text(watchActivity.trackCorrectionNote, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -317,20 +324,16 @@ fun RouteEventDetail(
         else Card(colors = CardDefaults.cardColors(containerColor = Coral.copy(alpha = .12f))) {
             Text("Анализ появится здесь после отправки очереди Mayushi.", Modifier.padding(16.dp))
         }
-        OutlinedButton(onClick = { vm.requestRouteAnalysis(id, "DEEP_ROUTE") }, Modifier.fillMaxWidth(), enabled = watchActivity != null) {
+        OutlinedButton(onClick = { showAnalysisChoice = true }, Modifier.fillMaxWidth(), enabled = watchActivity != null) {
             Icon(Icons.Default.AutoAwesome, null)
             Spacer(Modifier.width(8.dp))
             Text("Обновить персональный анализ")
         }
 
-        HorizontalDivider()
-        OutlinedButton(
-            onClick = { showDeleteConfirmation = true },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-        ) { Icon(Icons.Default.DeleteForever, null); Spacer(Modifier.width(8.dp)); Text("Удалить хайк") }
+
     }
 
+    if (showAnalysisChoice) HikeAnalysisChoice(id, vm) { showAnalysisChoice = false }
     if (searchRoute && watchActivity != null) RouteSearchDialog(currentRoute, watchActivity, vm) { searchRoute = false }
     if (showEditDialog) EditHikeDialog(currentRoute, vm, { showEditDialog = false })
     if (showDeleteConfirmation) AlertDialog(
@@ -344,14 +347,14 @@ fun RouteEventDetail(
 }
 
 @Composable
-private fun RouteSearchDialog(route: RouteEntity, activity: ActivityEntity, vm: AppViewModel, dismiss: () -> Unit) {
+internal fun RouteSearchDialog(route: RouteEntity, activity: ActivityEntity, vm: AppViewModel, initialCandidates: List<com.mayushi.trailsense.network.AllTrailsMcpClient.Candidate> = emptyList(), dismiss: () -> Unit) {
     val context = LocalContext.current
     val points = remember(activity.trackEncoded) { TrackCodec.decode(activity.trackEncoded) }
     val area = remember(points) { runCatching { com.mayushi.trailsense.network.AllTrailsMcpClient.Area.from(points) }.getOrNull() }
     var query by remember { mutableStateOf("") }
     var link by remember { mutableStateOf(route.sourceUrl.orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var candidates by remember { mutableStateOf<List<com.mayushi.trailsense.network.AllTrailsMcpClient.Candidate>>(emptyList()) }
+    var candidates by remember { mutableStateOf(initialCandidates) }
     var searching by remember { mutableStateOf(false) }
     var attempt by remember { mutableIntStateOf(0) }
     LaunchedEffect(attempt) {
@@ -375,6 +378,7 @@ private fun RouteSearchDialog(route: RouteEntity, activity: ActivityEntity, vm: 
                 Card(Modifier.fillMaxWidth().clickable { link = c.url }) {
                     Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(c.name, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(c.url))) }.onFailure { error = "Не удалось открыть браузер" } }, enabled = com.mayushi.trailsense.network.AllTrailsMcpClient.validRouteUrl(c.url)) { Text("Открыть кандидата в браузере") }
                         Text(listOfNotNull(c.length?.let(::km), c.gain?.let { "+${it.roundToInt()} м" }, c.type.takeIf { it.isNotBlank() }).joinToString(" · "))
                         c.length?.let { Text("Разница с часами: %.2f км".format((it-activity.distanceM)/1000)) }
                         Text("Кандидат из района GPS. Совпадение трека не доказано: AllTrails не вернул геометрию.", style = MaterialTheme.typography.bodySmall)
@@ -390,9 +394,9 @@ private fun RouteSearchDialog(route: RouteEntity, activity: ActivityEntity, vm: 
             OutlinedTextField(query, { query = it }, label = { Text("Ручной поиск: район / ориентиры") })
             OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode("site:alltrails.com/trail/ " + query)))) }.onFailure { error = "Не удалось открыть браузер" } }, enabled = query.isNotBlank()) { Text("Открыть поиск в браузере") }
             OutlinedTextField(link, { link = it }, label = { Text("Выбранная ссылка AllTrails") })
-            Text("Источник: официальный AllTrails MCP. Описания временные, сохраняется только подтверждённая ссылка.", style = MaterialTheme.typography.bodySmall)
+            Text("Источник: официальный AllTrails MCP. Описания временные, сохраняются подтверждённая ссылка и название выбранного кандидата.", style = MaterialTheme.typography.bodySmall)
         }
-    }, confirmButton = { Button(onClick = { vm.saveRoute(route.copy(sourceUrl = link.trim(), sourceLabel = candidates.firstOrNull { it.url == link.trim() }?.let { "AllTrails MCP:${it.id}" } ?: "AllTrails: подтверждено вручную")); dismiss() }, enabled = com.mayushi.trailsense.network.AllTrailsMcpClient.validRouteUrl(link.trim())) { Text("Подтвердить") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } })
+    }, confirmButton = { Button(onClick = { val candidate = candidates.firstOrNull { it.url == link.trim() }; vm.saveRoute(route.copy(title = candidate?.name ?: route.title, sourceUrl = link.trim(), sourceLabel = candidate?.let { "AllTrails MCP:${it.id}" } ?: "AllTrails: подтверждено вручную")); dismiss() }, enabled = com.mayushi.trailsense.network.AllTrailsMcpClient.validRouteUrl(link.trim())) { Text("Подтвердить") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } })
 }
 
 @Composable
@@ -435,16 +439,16 @@ private fun CompanionSummary(activity: ActivityEntity, vm: AppViewModel) {
     var selected by remember(ids) { mutableStateOf(ids.toSet()) }
     var newName by remember { mutableStateOf("") }
     Card(Modifier.fillMaxWidth().clickable { editing = true }) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Путники", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                IconButton(onClick = { editing = true }) { Icon(Icons.Default.Edit, "Изменить путников") }
+                IconButton(onClick = { editing = true }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Edit, "Изменить путников", Modifier.size(18.dp)) }
             }
             Text(if (names.isEmpty()) "Шла одна" else names.joinToString(" · "))
         }
     }
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 14.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
             Row(Modifier.fillMaxWidth().toggleable(value = activity.heavyBackpack, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = { vm.setHeavyBackpack(activity.id, it) }), verticalAlignment = Alignment.CenterVertically) {
                 Text("Тяжёлый рюкзак ≈15 кг", Modifier.weight(1f))
                 Switch(activity.heavyBackpack, onCheckedChange = null)
@@ -468,7 +472,8 @@ private fun TrackCorrectionPanel(activity: ActivityEntity, vm: AppViewModel) {
     val original = remember(activity.originalTrackEncoded, activity.trackEncoded) {
         TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
     }
-    val cumulative = remember(original) { com.mayushi.trailsense.domain.TrackGeometry.cumulative(original) }
+    val trimBaseline = remember(activity.trackEncoded) { TrackCodec.decode(activity.trackEncoded) }
+    val cumulative = remember(trimBaseline, activity.distanceM) { com.mayushi.trailsense.domain.TrackDistanceAxis.build(trimBaseline, displayedRecordedDistance(activity,trimBaseline)).meters }
     val totalKm = (cumulative.lastOrNull() ?: 0.0).div(1000).toFloat()
     if (totalKm <= 0f || original.size < 2) return
     var range by remember(activity.id, totalKm) { mutableStateOf(0f..totalKm) }
@@ -478,40 +483,28 @@ private fun TrackCorrectionPanel(activity: ActivityEntity, vm: AppViewModel) {
     var manualJoin by remember { mutableStateOf(totalKm * .97f) }
     fun joinIndex() = com.mayushi.trailsense.domain.TrackGeometry.indexAtDistance(cumulative, manualJoin * 1000.0)
     var manual by remember { mutableStateOf(false) }
+    var showRouting by remember { mutableStateOf(false) }
+    if (showRouting) RecoveryRouteDialog(original, recordedDistance(activity), { vm.recoverAlongTrails(activity.id, it) }) { showRouting = false }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TopographicTrackMap(recoveryPreview ?: original, Modifier.fillMaxWidth(), if (recoveryPreview == null) range.start / totalKm..range.endInclusive / totalKm else null, mapHeight = 210.dp)
+            TopographicTrackMap(trimBaseline, Modifier.fillMaxWidth(), range.start / totalKm..range.endInclusive / totalKm, mapHeight = 210.dp, distanceM = displayedRecordedDistance(activity,trimBaseline))
             RangeSlider(value = range, onValueChange = { if (it.endInclusive > it.start) range = it }, valueRange = 0f..totalKm)
-            Text("Оставить %.2f–%.2f км по GPS (всего %.2f км)".format(range.start, range.endInclusive, totalKm))
-            Text("Часы: ${km(com.mayushi.trailsense.data.OriginalWatchMetrics.decode(activity.originalMetricsJson ?: com.mayushi.trailsense.data.OriginalWatchMetrics.encode(com.mayushi.trailsense.domain.TrackAnalyzer.analyze(original))).distanceM)}", style = MaterialTheme.typography.labelSmall)
+            Text("Оставить %.2f–%.2f км (всего %.2f км)".format(range.start, range.endInclusive, totalKm))
+            Text("Будет обрезано: %.2f км".format(range.start + totalKm - range.endInclusive))
             Button(onClick = { vm.trimTrack(activity.id, range.start.toDouble() / totalKm, range.endInclusive.toDouble() / totalKm) }, Modifier.fillMaxWidth(), enabled = range.start > 0f || range.endInclusive < totalKm) {
                 Icon(Icons.Default.ContentCut, null); Spacer(Modifier.width(8.dp)); Text("Обрезать и пересчитать")
             }
-            OutlinedButton(onClick = { runCatching { TrackCorrection.inferMissingOutAndBackStart(original) }.onSuccess { recoveryPreview = it; recoveryError = null }.onFailure { recoveryError = it.message } }, Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Restore, null); Spacer(Modifier.width(8.dp)); Text("Восстановить забытое начало туда-обратно")
-            }
-            recoveryError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            recoveryPreview?.let { preview ->
-                Text("Начало — приблизительная оценка, не запись часов.")
-                SwitchRow("Выбрать точку возврата вручную", manual) {
-                    manual = it
-                    if (it) runCatching { TrackCorrection.inferMissingOutAndBackStart(original, manualJoinIndex = joinIndex()) }.onSuccess { recoveryPreview = it; recoveryError = null }.onFailure { recoveryError = it.message }
-                }
-                if (manual) {
-                    Slider(value = manualJoin, onValueChange = { manualJoin = it; runCatching { TrackCorrection.inferMissingOutAndBackStart(original, manualJoinIndex = joinIndex()) }.onSuccess { recoveryPreview = it; recoveryError = null }.onFailure { recoveryError = it.message } }, valueRange = (cumulative[original.size / 2] / 1000).toFloat()..(cumulative[original.lastIndex - 1] / 1000).toFloat())
-                    Text("Точка возврата %.2f км по GPS".format(manualJoin))
-                }
-                Button(onClick = { vm.inferMissingTrackStart(activity.id, if (manual) joinIndex() else null); recoveryPreview = null }, enabled = recoveryError == null) { Text("Подтвердить оценку начала") }
-                TextButton(onClick = { recoveryPreview = null; recoveryError = null; manual = false }) { Text("Отменить восстановление") }
+            OutlinedButton(onClick = { showRouting = true }, Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Restore, null); Spacer(Modifier.width(8.dp)); Text("Восстановить начало по тропам")
             }
             TextButton(onClick = { about = !about }) { Text("О восстановлении") }
-            if (about) Text("Начало зеркально оценивается по обратному участку. Время и добавленная дистанция — предположение; запись часов хранится отдельно.", style = MaterialTheme.typography.labelSmall)
+            if (about) Text(com.mayushi.trailsense.domain.TrackDistanceAxis.build(trimBaseline, displayedRecordedDistance(activity,trimBaseline)).provenance + ". Исходный GPS и итог часов хранятся отдельно. " + activity.trackCorrectionNote, style = MaterialTheme.typography.labelSmall)
             if (activity.trackCorrectionMode != "NONE") TextButton(onClick = { vm.resetTrackCorrection(activity.id) }, Modifier.fillMaxWidth()) { Text("Вернуть исходный трек") }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun HikeQuestionnaire(route: RouteEntity, activity: ActivityEntity, vm: AppViewModel) {
     val companions by vm.companions.collectAsStateWithLifecycle()
@@ -543,7 +536,7 @@ private fun HikeQuestionnaire(route: RouteEntity, activity: ActivityEntity, vm: 
     val setterOptions = (listOf("Я", "Смешанный", "Без спутников") + selectedNames).distinct()
 
     Card(Modifier.fillMaxWidth().animateContentSize()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Моя анкета", fontWeight = FontWeight.Bold)
@@ -581,12 +574,18 @@ private fun HikeQuestionnaire(route: RouteEntity, activity: ActivityEntity, vm: 
                 Text("Mayushi прочитает видимые показатели часов, но твоя собственная оценка сна останется главной.", style = MaterialTheme.typography.labelSmall)
 
                 SectionTitle("Путники и темп")
-                companions.forEach { companion ->
-                    FilterChip(
-                        selected = companion.id in selected,
-                        onClick = { selected = if (companion.id in selected) selected - companion.id else selected + companion.id },
-                        label = { Text(companion.name) },
-                    )
+                if (companions.isNotEmpty()) FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    companions.forEach { companion ->
+                        FilterChip(
+                            selected = companion.id in selected,
+                            onClick = { selected = if (companion.id in selected) selected - companion.id else selected + companion.id },
+                            label = { Text(companion.name) },
+                        )
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(newCompanion, { newCompanion = it }, Modifier.weight(1f), label = { Text("Новый путник") }, singleLine = true)
@@ -597,45 +596,10 @@ private fun HikeQuestionnaire(route: RouteEntity, activity: ActivityEntity, vm: 
                 ChoiceChips(listOf("Свободный" to "FREE", "Чуть медленнее" to "SLIGHT", "Заметно медленнее" to "NOTABLE", "Сильно медленнее" to "MUCH"), edit.paceConstraint) { edit = edit.copy(paceConstraint = it, representativeSpeed = it == "FREE") }
                 SwitchRow("Были ожидания / вынужденные остановки", edit.hadWaitingStops) { edit = edit.copy(hadWaitingStops = it) }
 
-                OutlinedButton(onClick = { customPace = !customPace }, Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Route, null); Spacer(Modifier.width(8.dp)); Text(if (customPace) "Скрыть участки разного темпа" else "Указать участки разного темпа (необязательно)")
-                }
-                if (customPace && points.size >= 2) {
-                    val legacyRange = selectedSegment?.let { index -> segments.getOrNull(index)?.let { it.startFraction.toFloat()..it.endFraction.toFloat() } } ?: segmentRange
-                    val gps = remember(points) { com.mayushi.trailsense.domain.TrackGeometry.cumulative(points) }
-                    val gpsTotal = gps.last().coerceAtLeast(1.0)
-                    val distanceRange = (gps[(points.lastIndex * legacyRange.start).roundToInt().coerceIn(0,points.lastIndex)] / gpsTotal).toFloat()..(gps[(points.lastIndex * legacyRange.endInclusive).roundToInt().coerceIn(0,points.lastIndex)] / gpsTotal).toFloat()
-                    TopographicTrackMap(points, Modifier.fillMaxWidth(), distanceRange, mapHeight = 210.dp)
-                    RangeSlider(value = segmentRange, onValueChange = { if (it.endInclusive - it.start >= .03f) { segmentRange = it; selectedSegment = null } })
-                    Row {
-                        OutlinedTextField((segmentRange.start*100).roundToInt().toString(), { s -> s.toFloatOrNull()?.takeIf { it in 0f..100f && it/100 < segmentRange.endInclusive }?.let { segmentRange = it/100..segmentRange.endInclusive; selectedSegment = null } }, Modifier.weight(1f), label = { Text("Начало %") })
-                        OutlinedTextField((segmentRange.endInclusive*100).roundToInt().toString(), { s -> s.toFloatOrNull()?.takeIf { it in 0f..100f && it/100 > segmentRange.start }?.let { segmentRange = segmentRange.start..it/100; selectedSegment = null } }, Modifier.weight(1f), label = { Text("Конец %") })
-                    }
-                    StringDropdown("Кто задавал темп на участке", setterOptions, segmentSetter) { segmentSetter = it }
-                    OutlinedTextField(segmentNote, { segmentNote = it }, Modifier.fillMaxWidth(), label = { Text("Заметка к участку") })
-                    Button(onClick = {
-                        segments = segments + PaceSegmentEntity(
-                            activityId = activity.id,
-                            startFraction = segmentRange.start.toDouble(),
-                            endFraction = segmentRange.endInclusive.toDouble(),
-                            paceSetterName = segmentSetter,
-                            note = segmentNote.trim(),
-                        )
-                        segmentNote = ""
-                    }, Modifier.fillMaxWidth()) { Text("Добавить участок") }
-                    segments.forEachIndexed { index, segment ->
-                        ListItem(
-                            headlineContent = { Text("${(segment.startFraction * 100).roundToInt()}–${(segment.endFraction * 100).roundToInt()}% · ${segment.paceSetterName}", Modifier.clickable { selectedSegment = index }) },
-                            supportingContent = { if (segment.note.isNotBlank()) Text(segment.note) },
-                            trailingContent = { IconButton(onClick = { segments = segments.filterIndexed { i, _ -> i != index } }) { Icon(Icons.Default.Close, "Удалить") } },
-                        )
-                    }
-                }
 
-                OutlinedTextField(edit.comment, { edit = edit.copy(comment = it) }, Modifier.fillMaxWidth(), label = { Text("Комментарий к походу") }, minLines = 3)
-                OutlinedTextField(editRoute.notes, { editRoute = editRoute.copy(notes = it) }, Modifier.fillMaxWidth(), label = { Text("Заметка о маршруте") }, minLines = 2)
+                OutlinedTextField(com.mayushi.trailsense.domain.HikeComments.merge(edit.comment, editRoute.notes), { edit = edit.copy(comment = it); editRoute = editRoute.copy(notes = "") }, Modifier.fillMaxWidth(), label = { Text("Комментарий к походу") }, minLines = 3)
                 Button(onClick = {
-                    vm.saveHikeQuestionnaire(editRoute, edit, selected, segments) { expanded = false }
+                    vm.saveHikeQuestionnaire(editRoute.copy(notes = ""), edit.copy(comment = com.mayushi.trailsense.domain.HikeComments.merge(edit.comment, editRoute.notes)), selected, savedSegments) { expanded = false }
                 }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Сохранить анкету") }
             }
         }
