@@ -73,6 +73,7 @@ data class ActivityEntity(
     val anomaly: String = "NORMAL",
     val paceSetter: String = "SELF",
     val paceConstraint: String = "FREE",
+    @ColumnInfo(defaultValue = "0") val heavyBackpack: Boolean = false,
     val hadWaitingStops: Boolean = false,
     val representativeSpeed: Boolean = true,
     @ColumnInfo(defaultValue = "'NONE'") val trackCorrectionMode: String = "NONE",

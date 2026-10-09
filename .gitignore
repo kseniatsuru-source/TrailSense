@@ -66,3 +66,6 @@ signing.properties
 /app/src/test/java/com/mayushi/trailsense/data/LargeTrackDatabaseTest.kt
 /app/src/test/java/com/mayushi/trailsense/network/AnalysisPayloadBuilderTest.kt
 /app/src/test/java/com/mayushi/trailsense/network/RichAnalysisPayloadTest.kt
+
+# Local 0.3.5 acceptance harness reads a private emulator activity and export
+/app/src/androidTest/java/com/mayushi/trailsense/AllTrailsLive035Test.kt

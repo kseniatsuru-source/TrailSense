@@ -9,6 +9,16 @@ object TrackGeometry {
         for (i in 1 until points.size) result[i] = result[i-1] + if (disconnected(points[i-1], points[i])) 0.0 else Geo.distanceM(points[i-1], points[i])
         return result
     }
+    /** Nearest recorded point by cumulative GPS distance, never by sampling index. */
+    fun indexAtDistance(cumulative: DoubleArray, distanceM: Double): Int {
+        require(cumulative.isNotEmpty())
+        val target = distanceM.coerceIn(0.0, cumulative.last())
+        val found = cumulative.binarySearch(target)
+        if (found >= 0) return found
+        val next = (-found - 1).coerceAtMost(cumulative.lastIndex)
+        val previous = (next - 1).coerceAtLeast(0)
+        return if (target - cumulative[previous] <= cumulative[next] - target) previous else next
+    }
     fun split(points: List<TrackPoint>): List<List<TrackPoint>> {
         if (points.isEmpty()) return emptyList()
         val result = mutableListOf<List<TrackPoint>>()

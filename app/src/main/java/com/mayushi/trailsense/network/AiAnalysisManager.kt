@@ -15,7 +15,7 @@ object AnalysisPrompt {
     private const val BASE_INSTRUCTIONS = """Ты — Mayushi, личный аналитик походов Ксюши. Отвечай по-русски, кратко, конкретно и без медицинских выводов. Используй все ненулевые данные из input и персонализируй вывод по фактическому походу, личным оценкам, сну, спутникам, ограничению темпа и нейтральному контексту назначенной схемы, если они переданы. Разделяй объективную сложность маршрута, наблюдаемую нагрузку и контекст поездки; не смешивай плановые данные AllTrails с фактическими метриками часов. Если у ROUTE есть linked_activity, обязательно сопоставь дистанцию, набор, время, темп, пульс и субъективные оценки с параметрами маршрута. Если linked_activity=null, анализируй только маршрут и не добавляй шаблонный раздел про отсутствие нагрузки. Не перечисляй отсутствующие показатели и не пиши, что нет данных о температуре, пульсе, темпе или других полях, если эти поля не переданы либо не относятся к заданию. Не называй этап схемы комбинированных таблеток естественной фазой цикла, не советуй менять приём и не приписывай ему причинность. Не выдумывай причины необычной нагрузки: отмечай только наблюдаемую связь и контекст. Если передан source_url AllTrails, по инициативе пользователя проверь только публичную страницу web/browser-инструментами; не обходи логин, CAPTCHA или ограничения. Если приложен скриншот Huawei Health, выпиши только явно видимые показатели и укажи сомнения в summary. Верни СТРОГО JSON без markdown: {"summary":"текст","route_facts":null,"activity_facts":null}. route_facts при маршруте: {"title":null,"distance_m":null,"gain_m":null,"loss_m":null,"difficulty":null,"rating":null}. activity_facts при скриншоте: {"title":null,"distance_m":null,"gain_m":null,"loss_m":null,"elapsed_s":null,"moving_s":null,"stopped_s":null,"avg_hr":null,"max_hr":null}. Неприменимый объект оставь null."""
     private const val RICH_FORMAT = """
 
-Используй участки с разным ведущим темпом, корректировку трека, календарные заметки и скриншот сна, если они переданы. Субъективная оценка сна Ксюши важнее оценки часов. Поле summary оформи разметкой с короткими заголовками, списками и, когда есть сопоставимые числа, Markdown-таблицей:
+Тяжёлый рюкзак — приблизительный контекст ≈15 кг для ночёвки, не измеренный вес. Не выдумывай расход калорий или формулу нагрузки из этого значения. Используй участки с разным ведущим темпом, корректировку трека, календарные заметки и скриншот сна, если они переданы. Субъективная оценка сна Ксюши важнее оценки часов. Поле summary оформи разметкой с короткими заголовками, списками и, когда есть сопоставимые числа, Markdown-таблицей:
 ## Маршрут
 ## Факт и ориентир
 | Показатель | Ориентир | Факт | Разница |
@@ -88,7 +88,7 @@ object AiJobFreshness {
 }
 
 class AiAnalysisManager(private val context: Context, private val dao: TrailDao, private val prefs: AppPreferences) {
-    suspend fun enqueue(type: String, entityId: Long, kind: String, payload: JSONObject, imagePath: String? = null, imageMimeType: String? = null): Boolean {
+    suspend fun enqueue(type: String, entityId: Long, kind: String, payload: JSONObject, imagePath: String? = null, imageMimeType: String? = null, allowDirect: Boolean = true): Boolean {
         val input = payload.put("analysis_kind", kind).put("algorithm_version", AnalysisPrompt.VERSION).toString()
         val attachment = imagePath?.let(::File)
         if (attachment != null) require(attachment.isFile) { "Вложение для анализа больше недоступно" }
@@ -101,7 +101,7 @@ class AiAnalysisManager(private val context: Context, private val dao: TrailDao,
         if (prefs.directHermesEnabled && prefs.monthlyTokenBudget > 0 && used >= prefs.monthlyTokenBudget) throw IllegalStateException("Достигнут месячный лимит AI")
         val id = dao.enqueuePendingAiJob(AiJobEntity(entityType = type, entityId = entityId, analysisKind = kind, inputJson = input, inputHash = hash, imagePath = imagePath, imageMimeType = imageMimeType))
         if (id <= 0) return false
-        if (prefs.directHermesEnabled) schedule(id, ExistingWorkPolicy.KEEP)
+        if (allowDirect && prefs.directHermesEnabled) schedule(id, ExistingWorkPolicy.KEEP)
         return true
     }
 

@@ -10,8 +10,9 @@ object TrackCorrection {
             "Некорректные границы трека"
         }
         val last = points.lastIndex
-        val start = (last * startFraction).roundToInt().coerceIn(0, last - 1)
-        val end = (last * endFraction).roundToInt().coerceIn(start + 1, last)
+        val cumulative = TrackGeometry.cumulative(points)
+        val start = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * startFraction).coerceIn(0, last - 1)
+        val end = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * endFraction).coerceIn(start + 1, last)
         return points.subList(start, end + 1).toList()
     }
 

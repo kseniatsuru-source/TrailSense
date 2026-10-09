@@ -13,12 +13,13 @@ android {
         applicationId = "com.mayushi.trailsense"
         minSdk = 28
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.3.4"
+        versionCode = 17
+        versionName = "0.3.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
+    testBuildType = "release"
     buildFeatures { compose = true; buildConfig = true }
     buildTypes {
         getByName("release") {

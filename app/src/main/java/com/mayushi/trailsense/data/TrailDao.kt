@@ -97,6 +97,14 @@ interface TrailDao {
         invalidateAiForActivity(activity.id)
     }
 
+    @Query("UPDATE ai_jobs SET status='SUPERSEDED', lastError='Контекст рюкзака изменился' WHERE status='PENDING' AND ((entityType='ACTIVITY' AND entityId=:activityId) OR (entityType='ROUTE' AND entityId IN (SELECT routeId FROM activities WHERE id=:activityId)))")
+    suspend fun supersedeBackpackJobs(activityId: Long)
+    @Transaction
+    suspend fun updateBackpack(activity: ActivityEntity) {
+        updateActivityAndInvalidate(activity)
+        supersedeBackpackJobs(activity.id)
+    }
+
     @Query("SELECT * FROM companions ORDER BY name COLLATE NOCASE") fun observeCompanions(): Flow<List<CompanionEntity>>
     @Insert suspend fun insertCompanion(companion: CompanionEntity): Long
     @Update suspend fun updateCompanion(companion: CompanionEntity)

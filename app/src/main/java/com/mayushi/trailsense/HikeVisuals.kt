@@ -26,6 +26,38 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Polyline
 import kotlin.math.roundToInt
 
+/** One finger drags; two fingers change scale only, anchored to the existing center. */
+class TrackMapView(context: android.content.Context) : MapView(context) {
+    private var pinchCenter: GeoPoint? = null
+    private var pinching = false
+    private val scaleDetector = android.view.ScaleGestureDetector(context, object : android.view.ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: android.view.ScaleGestureDetector): Boolean {
+            val zoom = (zoomLevelDouble + kotlin.math.ln(detector.scaleFactor.toDouble()) / kotlin.math.ln(2.0)).coerceIn(minZoomLevel, maxZoomLevel)
+            controller.setZoom(zoom)
+            pinchCenter?.let { controller.setCenter(it) }
+            return true
+        }
+    })
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+        parent?.requestDisallowInterceptTouchEvent(true)
+        if (event.pointerCount >= 2 && !pinching) {
+            pinchCenter = GeoPoint(mapCenter.latitude, mapCenter.longitude)
+            pinching = true
+            val cancel = android.view.MotionEvent.obtain(event).apply { action = android.view.MotionEvent.ACTION_CANCEL }
+            super.dispatchTouchEvent(cancel)
+            cancel.recycle()
+        }
+        scaleDetector.onTouchEvent(event)
+        val result = if (pinching) true else super.dispatchTouchEvent(event)
+        if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) {
+            pinchCenter = null
+            pinching = false
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return result
+    }
+}
+
 @Composable
 fun TopographicTrackMap(
     points: List<TrackPoint>,
@@ -36,31 +68,33 @@ fun TopographicTrackMap(
 ) {
     if (points.size < 2) return
     val context = LocalContext.current
-    val map = remember { MapView(context).apply {
+    val map = remember { TrackMapView(context).apply {
         setTileSource(TileSourceFactory.OpenTopo)
-        setMultiTouchControls(true)
+        setMultiTouchControls(false)
         controller.setZoom(13.0)
     } }
     DisposableEffect(map) {
         map.onResume()
         onDispose { map.onPause(); map.onDetach() }
     }
+    var fitted by remember { mutableStateOf(false) }
     LaunchedEffect(points, highlightedRange, pois) {
         map.overlays.clear()
         TrackGeometry.split(points).filter { it.size >= 2 }.forEach { segment ->
             map.overlays += Polyline().apply {
                 setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(240,173,145) else AndroidColor.rgb(164,216,184)
+                outlinePaint.color = if (highlightedRange != null) AndroidColor.rgb(110,120,130) else if (segment.first().inferred) AndroidColor.rgb(25,150,70) else AndroidColor.rgb(0,105,220)
                 outlinePaint.strokeWidth = 8f
             }
         }
         highlightedRange?.let { range ->
-            val start = (points.lastIndex * range.start).roundToInt().coerceIn(0, points.lastIndex - 1)
-            val end = (points.lastIndex * range.endInclusive).roundToInt().coerceIn(start + 1, points.lastIndex)
+            val cumulative = TrackGeometry.cumulative(points)
+            val start = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * range.start).coerceIn(0, points.lastIndex - 1)
+            val end = TrackGeometry.indexAtDistance(cumulative, cumulative.last() * range.endInclusive).coerceIn(start + 1, points.lastIndex)
             TrackGeometry.split(points.subList(start,end+1)).filter { it.size >= 2 }.forEach { segment ->
                 map.overlays += Polyline().apply {
                     setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                    outlinePaint.color = AndroidColor.rgb(240,173,145)
+                    outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(25,150,70) else AndroidColor.rgb(0,105,220)
                     outlinePaint.strokeWidth = 12f
                 }
             }
@@ -72,7 +106,10 @@ fun TopographicTrackMap(
         val south = points.minOf { it.latitude }
         val east = points.maxOf { it.longitude }
         val west = points.minOf { it.longitude }
-        map.post { map.zoomToBoundingBox(BoundingBox(north, east, south, west), true, 48) }
+        if (!fitted) {
+            fitted = true
+            map.post { map.zoomToBoundingBox(BoundingBox(north, east, south, west), false, 48) }
+        }
         map.invalidate()
     }
     Column(modifier.clipToBounds(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -89,7 +126,7 @@ fun TopographicTrackMap(
             )
         }
         Text(
-            (if (points.any { it.inferred }) "Зелёный — запись · персиковый — оценка начала. " else "") + "Топографическая карта: водоёмы, рельеф и горизонтали · © OpenStreetMap contributors · OpenTopoMap",
+            (if (points.any { it.inferred }) "Синий — запись · зелёный — оценка. " else if (highlightedRange != null) "Синий — оставить · серый — убрать. " else "") + "© OpenStreetMap contributors · OpenTopoMap (CC-BY-SA)",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -123,8 +160,8 @@ fun ElevationProfile(points: List<TrackPoint>, modifier: Modifier = Modifier) {
                 val a=position(index-1); val b=position(index)
                 target.moveTo(a.x,a.y); target.lineTo(b.x,b.y)
             }
-            drawPath(path, color = Forest, style = Stroke(width = 4f))
-            drawPath(inferredPath, color = Coral, style = Stroke(width = 4f))
+            drawPath(path, color = androidx.compose.ui.graphics.Color(0xFF2389FF), style = Stroke(width = 4f))
+            drawPath(inferredPath, color = androidx.compose.ui.graphics.Color(0xFF29BE68), style = Stroke(width = 4f))
             drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), 1f)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("0 км"); Text("%.2f км по GPS".format(cumulative.last()/1000.0)) }

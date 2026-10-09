@@ -103,6 +103,12 @@ object AnalysisPayloadBuilder {
             .putNullable("sleep_quality", activity.sleepQuality)
             .putNullable("felt_rested", activity.feltRested)
             .put("sleep_screenshot_attached", !activity.sleepScreenshotPath.isNullOrBlank())
+            .put("heavy_backpack", activity.heavyBackpack)
+            .put("backpack_context", JSONObject()
+                .put("enabled", activity.heavyBackpack)
+                .put("approximate_weight_kg", if (activity.heavyBackpack) 15 else JSONObject.NULL)
+                .put("weight_is_measured", false)
+                .put("context", "OVERNIGHT_LOAD_APPROXIMATE_NOT_CALORIE_MEASUREMENT"))
             .put("anomaly", activity.anomaly)
             .put("pace_setter", activity.paceSetter)
             .put("pace_segments", JSONArray().apply {

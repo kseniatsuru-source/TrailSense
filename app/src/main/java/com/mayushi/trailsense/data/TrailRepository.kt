@@ -171,6 +171,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         dao.updateRouteAndInvalidate(current.copy(
             title = form.title,
             sourceUrl = form.sourceUrl,
+            sourceLabel = form.sourceLabel,
             overallDifficulty = form.overallDifficulty,
             climbDifficulty = form.climbDifficulty,
             technicality = form.technicality,
@@ -244,7 +245,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
     suspend fun trimActivityTrack(activityId: Long, startFraction: Double, endFraction: Double) = serializedWrite {
         val activity = dao.activity(activityId) ?: error("Поход не найден")
         val original = TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
-        updateCorrectedTrack(activity, TrackCorrection.trim(original, startFraction, endFraction), "TRIM", "Оставлено ${(startFraction * 100).toInt()}–${(endFraction * 100).toInt()}% исходной записи")
+        updateCorrectedTrack(activity, TrackCorrection.trim(original, startFraction, endFraction), "TRIM", "Оставлено %.2f–%.2f км по GPS".format(TrackGeometry.cumulative(original).last() * startFraction / 1000, TrackGeometry.cumulative(original).last() * endFraction / 1000))
     }
 
     suspend fun inferMissingOutAndBackStart(activityId: Long, joinIndex: Int? = null) = serializedWrite {
@@ -309,6 +310,17 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
                 updatedAt = now,
             ),
         )
+    }
+
+    suspend fun setHeavyBackpack(activityId: Long, enabled: Boolean) = serializedWrite {
+        val current = dao.activity(activityId) ?: error("Поход не найден")
+        dao.updateBackpack(current.copy(heavyBackpack = enabled,
+            updatedAt = maxOf(System.currentTimeMillis(), current.updatedAt + 1)))
+    }
+
+    suspend fun saveCompanions(activityId: Long, ids: Set<Long>) = serializedWrite {
+        val current = dao.activity(activityId) ?: error("Поход не найден")
+        dao.updateActivityWithCompanions(current.copy(updatedAt = maxOf(System.currentTimeMillis(), current.updatedAt + 1)), ids)
     }
 
     suspend fun setManualDate(activityId: Long, date: java.time.LocalDate?) = serializedWrite {

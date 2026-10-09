@@ -93,10 +93,12 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun TrailSenseApp(initialIntent: Intent?, vm: AppViewModel = viewModel()) {
+    val context = LocalContext.current
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var routeId by rememberSaveable { mutableStateOf<Long?>(null) }
     var routeEditRequested by rememberSaveable { mutableStateOf(false) }
     var routeMenu by remember { mutableStateOf(false) }
+    var deleteRequested by remember { mutableStateOf(false) }
     var navigationHistory by rememberSaveable(stateSaver = androidx.compose.runtime.saveable.listSaver<List<Pair<Tab,Long?>>,String>(
         save = { history -> history.map { "${it.first.name}:${it.second ?: ""}" } },
         restore = { values -> values.map { value -> val parts=value.split(":"); Tab.valueOf(parts[0]) to parts[1].toLongOrNull() } }
@@ -149,6 +151,8 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
                             IconButton(onClick = { routeMenu = true }) { Icon(Icons.Default.MoreVert, "Меню хайка") }
                             DropdownMenu(expanded = routeMenu, onDismissRequest = { routeMenu = false }) {
                                 DropdownMenuItem(text = { Text("Изменить") }, onClick = { routeMenu = false; routeEditRequested = true })
+                                DropdownMenuItem(text = { Text("Отправить на анализ") }, onClick = { routeMenu = false; routeId?.let { vm.sendCurrentHike(context, it) } })
+                                DropdownMenuItem(text = { Text("Удалить хайк") }, onClick = { routeMenu = false; deleteRequested = true })
                             }
                         }
                     } else if (tab == Tab.HOME && pendingAi > 0) {
@@ -176,7 +180,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
-                routeId != null -> RouteEventDetail(routeId!!, vm, goBack, routeEditRequested) { routeEditRequested = false }
+                routeId != null -> key(routeId) { RouteEventDetail(routeId!!, vm, goBack, routeEditRequested, { routeEditRequested = false }, deleteRequested, { deleteRequested = false }) }
                 else -> when (tab) {
                     Tab.HOME -> EventsScreen(vm, openRoute)
                     Tab.CALENDAR -> ContextCalendarScreen(vm)
@@ -406,7 +410,7 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
 
 @Composable fun TrackPreview(points: List<TrackPoint>, modifier: Modifier = Modifier) {
     if (points.size < 2) return
-    Card(modifier) { Canvas(Modifier.fillMaxSize().padding(16.dp)) { val minLat = points.minOf { it.latitude }; val maxLat = points.maxOf { it.latitude }; val minLon = points.minOf { it.longitude }; val maxLon = points.maxOf { it.longitude }; val latSpan = (maxLat - minLat).takeIf { it > 0 } ?: 1.0; val lonSpan = (maxLon - minLon).takeIf { it > 0 } ?: 1.0; val path = Path(); points.forEachIndexed { i, p -> val x = ((p.longitude - minLon) / lonSpan * size.width).toFloat(); val y = (size.height - (p.latitude - minLat) / latSpan * size.height).toFloat(); if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, Forest, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f)); drawCircle(Coral, 8f, Offset(0f, size.height)); } }
+    Card(modifier) { Canvas(Modifier.fillMaxSize().padding(16.dp)) { val minLat = points.minOf { it.latitude }; val maxLat = points.maxOf { it.latitude }; val minLon = points.minOf { it.longitude }; val maxLon = points.maxOf { it.longitude }; val latSpan = (maxLat - minLat).takeIf { it > 0 } ?: 1.0; val lonSpan = (maxLon - minLon).takeIf { it > 0 } ?: 1.0; val path = Path(); points.forEachIndexed { i, p -> val x = ((p.longitude - minLon) / lonSpan * size.width).toFloat(); val y = (size.height - (p.latitude - minLat) / latSpan * size.height).toFloat(); if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }; drawPath(path, Color(0xFF2389FF), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 6f)); drawCircle(Coral, 8f, Offset(0f, size.height)); } }
 }
 
 @Composable fun RatingField(label: String, value: Int?, set: (Int) -> Unit) { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); (1..5).forEach { score -> IconButton(onClick = { set(score) }) { Icon(if ((value ?: 0) >= score) Icons.Default.Circle else Icons.Default.RadioButtonUnchecked, score.toString(), tint = if ((value ?: 0) >= score) Coral else Color.Gray) } } } }
@@ -427,7 +431,16 @@ enum class Tab(val title: String, val icon: androidx.compose.ui.graphics.vector.
     }
 }
 @Composable fun Metric(label: String, value: String) { Card(colors = CardDefaults.cardColors(containerColor = Forest.copy(alpha = .08f))) { Column(Modifier.padding(10.dp)) { Text(value, fontWeight = FontWeight.Bold); Text(label, style = MaterialTheme.typography.labelSmall) } } }
-@Composable fun AiCard(text: String, input: Int?, output: Int?) { Card(colors = CardDefaults.cardColors(containerColor = Coral.copy(alpha = .12f))) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { RichAnalysisText(text); if (input != null || output != null) Text("Токены: ${(input ?: 0) + (output ?: 0)}", style = MaterialTheme.typography.labelSmall, color = Color.Gray) } } }
+@Composable fun AiCard(text: String, input: Int?, output: Int?) {
+    var details by remember(text) { mutableStateOf(false) }
+    Card(colors = CardDefaults.cardColors(containerColor = Coral.copy(alpha = .12f))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RichAnalysisText(if (details) text else text.substringBefore("\n\n"))
+            if (text.contains("\n\n") || input != null || output != null) TextButton(onClick = { details = !details }) { Text(if (details) "Скрыть детали" else "Детали анализа") }
+            if (details && (input != null || output != null)) Text("Токены: ${(input ?: 0) + (output ?: 0)}", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
 @Composable fun SectionTitle(text: String) { Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
 @Composable fun EmptyState(title: String, text: String) { Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Default.Hiking, null, Modifier.size(52.dp), tint = Forest); Text(title, fontWeight = FontWeight.Bold); if (text.isNotBlank()) Text(text, color = Color.Gray) } }
 

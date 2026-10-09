@@ -50,8 +50,8 @@ class TelegramExchangeManager(
 ) {
     private val dao get() = database.trailDao()
 
-    suspend fun createRequestFile(): TelegramRequestFile = withContext(Dispatchers.IO) {
-        val snapshot = dao.pendingAiJobs()
+    suspend fun createRequestFile(routeId: Long? = null, analysisKind: String? = null): TelegramRequestFile = withContext(Dispatchers.IO) {
+        val snapshot = dao.pendingAiJobs().filter { routeId == null || (it.entityType == "ROUTE" && it.entityId == routeId && (analysisKind == null || it.analysisKind == analysisKind)) }
         require(snapshot.isNotEmpty()) { "Очередь анализа пуста" }
         var supersededCount = 0
         val tasks = buildList {

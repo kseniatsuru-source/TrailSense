@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [TrackChunkEntity::class, RouteEntity::class, ActivityEntity::class, CompanionEntity::class, ActivityCompanionCrossRef::class, PaceSegmentEntity::class, CalendarContextEntity::class, PillPlanEntity::class, PillEventEntity::class, AiCacheEntity::class, AiJobEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class TrailDatabase : RoomDatabase() {
@@ -19,8 +19,16 @@ abstract class TrailDatabase : RoomDatabase() {
         @Volatile private var instance: TrailDatabase? = null
         fun get(context: Context): TrailDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, TrailDatabase::class.java, "trailsense.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_6, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_6, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build().also { instance = it }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE activities ADD COLUMN heavyBackpack INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("DELETE FROM ai_cache")
+                db.execSQL("UPDATE ai_jobs SET status='SUPERSEDED', lastError='Добавлен контекст рюкзака' WHERE status='PENDING'")
+            }
         }
 
         val MIGRATION_6_7 = object : Migration(6, 7) {

@@ -150,6 +150,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.repository.inferMissingOutAndBackStart(activityId, joinIndex)
         _message.value = "Начало восстановлено по обратному участку; все показатели пересчитаны"
     }
+    fun setHeavyBackpack(activityId: Long, enabled: Boolean) = launchBusy {
+        app.repository.setHeavyBackpack(activityId, enabled)
+        _message.value = "Контекст рюкзака сохранён; старый анализ сброшен"
+    }
+    fun saveCompanions(activityId: Long, ids: Set<Long>) = launchBusy {
+        app.repository.saveCompanions(activityId, ids)
+        _message.value = "Путники сохранены"
+    }
+    fun sendCurrentHike(context: Context, routeId: Long) = viewModelScope.launch {
+        requestRouteAnalysis(routeId, "DEEP_ROUTE", allowDirect = false).join()
+        shareAiQueue(context, routeId).join()
+    }
     fun setManualDate(activityId: Long, date: LocalDate?) = launchBusy { app.repository.setManualDate(activityId, date); _message.value = "Дата обновлена; старый анализ сброшен" }
     fun resetTrackCorrection(activityId: Long) = launchBusy {
         app.repository.resetTrackCorrection(activityId)
@@ -194,7 +206,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = "Отклонение записано"
     }
 
-    fun requestRouteAnalysis(id: Long, kind: String) = viewModelScope.launch {
+    fun requestRouteAnalysis(id: Long, kind: String, allowDirect: Boolean = true) = viewModelScope.launch {
         try {
             val route = app.repository.routeOnce(id) ?: return@launch
             val linkedActivity = app.repository.latestActivityForRouteOnce(id)
@@ -213,7 +225,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             payload.put("pill_facts_and_deviations", pillFactsJson(app.repository.pillEventsOnce()))
             val sleepImage = linkedActivity?.sleepScreenshotPath
             if (sleepImage != null) payload.put("attachment_kind", "SLEEP_SCREENSHOT")
-            app.aiManager.enqueue("ROUTE", id, kind, payload, sleepImage, sleepImage?.let { "image/jpeg" })
+            app.aiManager.enqueue("ROUTE", id, kind, payload, sleepImage, sleepImage?.let { "image/jpeg" }, allowDirect)
             _message.value = if (kind == "DEEP_ROUTE") "Персональный глубокий анализ добавлен в очередь — отправь её через Telegram" else "Персональный анализ добавлен в очередь — отправь её через Telegram"
         } catch (e: Exception) { _message.value = e.message ?: "Не удалось запустить анализ" }
     }
@@ -242,9 +254,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = "JSON сохранён локально: ${request.taskCount} заданий"
     }
 
-    fun shareAiQueue(context: Context) = launchBusy {
+    fun shareAiQueue(context: Context, routeId: Long? = null) = launchBusy {
         _message.value = "Готовлю файл для Telegram…"
-        val request = withContext(Dispatchers.IO) { app.telegramExchange.createRequestFile() }
+        val request = withContext(Dispatchers.IO) { app.telegramExchange.createRequestFile(routeId, routeId?.let { "DEEP_ROUTE" }) }
         val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", request.file)
         val readPermission = Intent.FLAG_GRANT_READ_URI_PERMISSION
         val share = Intent(Intent.ACTION_SEND).apply {
