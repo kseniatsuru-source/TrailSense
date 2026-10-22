@@ -41,6 +41,7 @@ object AnalysisPayloadBuilder {
         zoneId: ZoneId = ZoneId.systemDefault(),
     ): JSONObject = JSONObject()
         .put("entity_updated_at", activity.updatedAt)
+        .put("recorded_track_sha256", com.mayushi.trailsense.data.HuaweiPackage.sha(activity.trackEncoded))
         .put("analysis_context_snapshot", AnalysisContextSnapshot.create(sleepNormHours, pillPlan, calendarContext.maxOfOrNull { it.updatedAt }))
         .put("activity", activityJson(activity, companionNames, paceSegments, sleepNormHours, zoneId))
         .put("calendar_context", calendarContextJson(calendarContext))
@@ -81,6 +82,7 @@ object AnalysisPayloadBuilder {
             .putNullable("route_id", activity.routeId)
             .put("title", activity.title)
             .put("source_format", activity.sourceFormat)
+            .put("huawei_archive", activity.huaweiFactsJson.takeIf { it.isNotBlank() }?.let(::JSONObject) ?: JSONObject.NULL)
             .put("source_file_name", activity.sourceFileName)
             .putNullable("started_at_ms", activity.startedAt)
             .putNullable("date", activity.startedAt?.let { Instant.ofEpochMilli(it).atZone(zoneId).toLocalDate().toString() })
@@ -96,9 +98,15 @@ object AnalysisPayloadBuilder {
             .putNullable("effort", activity.overallEffort)
             .putNullable("climb_effort", activity.climbEffort)
             .putNullable("descent_effort", activity.descentEffort)
+            .put("blank_descent_meaning", if(activity.descentEffort!=null) "RATED" else com.mayushi.trailsense.domain.DescentEvidence.blankMeaning(activity.questionnaireCompletedAt,activity.questionnaireHistory,if(activity.trackCorrectionMode!="NONE") emptyList() else runCatching { com.mayushi.trailsense.domain.TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded) }.getOrDefault(emptyList())))
             .putNullable("technicality", activity.technicality)
             .putNullable("enjoyment", activity.enjoyment)
             .putNullable("sleep_hours", activity.sleepHours)
+            .putNullable("sleep_ocr_minutes", activity.sleepOcrMinutes)
+            .putNullable("sleep_ocr_status", activity.sleepOcrStatus)
+            .put("questionnaire_history", activity.questionnaireHistory)
+            .put("weather_context", com.mayushi.trailsense.domain.WeatherContext.read(activity.questionnaireHistory).json())
+            .put("rating_applicability", JSONObject(com.mayushi.trailsense.domain.RatingApplicability.states(activity.questionnaireHistory)))
             .put("sleep_norm_hours", sleepNormHours)
             .putNullable("sleep_quality", activity.sleepQuality)
             .putNullable("felt_rested", activity.feltRested)
@@ -134,12 +142,13 @@ object AnalysisPayloadBuilder {
             .put("comment", activity.comment)
     }
 
-    private fun calendarContextJson(context: List<CalendarContextEntity>) = JSONArray().apply {
+    fun calendarContextJson(context: List<CalendarContextEntity>) = JSONArray().apply {
         context.forEach { item ->
             put(JSONObject()
                 .put("type", item.type)
                 .put("start_date", java.time.LocalDate.ofEpochDay(item.startEpochDay).toString())
-                .put("end_date", java.time.LocalDate.ofEpochDay(item.endEpochDay).toString())
+                .put("end_date", if(item.ongoing) JSONObject.NULL else java.time.LocalDate.ofEpochDay(item.endEpochDay).toString())
+                .put("ongoing", item.ongoing)
                 .putNullable("severity", item.severity)
                 .put("note", item.note))
         }

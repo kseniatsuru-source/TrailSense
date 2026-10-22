@@ -1,0 +1,112 @@
+{
+  "trackChunks": [
+    {
+      "sourceId": "synthetic-w1",
+      "ordinal": 0,
+      "points": [
+        {
+          "latitude": 1,
+          "longitude": 2,
+          "timeMs": 1704103200000,
+          "elevationM": 100,
+          "heartRateBpm": 120,
+          "cadenceSpm": 90
+        },
+        {
+          "latitude": 1,
+          "longitude": 3,
+          "timeMs": 1704106800000,
+          "elevationM": 200,
+          "heartRateBpm": 130,
+          "cadenceSpm": 100
+        }
+      ]
+    }
+  ],
+  "rawChunks": [
+    {
+      "sourceId": "synthetic-w1",
+      "ordinal": 0,
+      "lines": [
+        "synthetic original detail line\n"
+      ],
+      "heartRateSamples": [
+        {
+          "timeMs": 1704103200000,
+          "bpm": 120
+        }
+      ],
+      "cadenceSamples": [
+        {
+          "timeMs": 1704103200000,
+          "spm": 90
+        }
+      ],
+      "elevationSamples": [
+        {
+          "timeMs": 1704103200000,
+          "meters": 100
+        }
+      ]
+    }
+  ],
+  "workouts": [
+    {
+      "sourceId": "synthetic-w1",
+      "deviceId": "synthetic",
+      "subType": 282,
+      "sportType": 282,
+      "title": "Synthetic hike",
+      "startTimeMs": 1704103200000,
+      "endTimeMs": 1704106800000,
+      "sourceOffset": "+0000",
+      "distanceM": 5000,
+      "gainDm": 3000,
+      "lossDm": 3000,
+      "totalTimeMs": 3500000,
+      "avgHrBpm": 120,
+      "maxHrBpm": 150,
+      "steps": 7000,
+      "cadenceSpm": 100,
+      "paceSecondsPerKm": 700,
+      "raw": {
+        "source": "synthetic",
+        "units": {
+          "gainDm": "decimeter",
+          "totalTimeMs": "millisecond"
+        }
+      },
+      "track": {
+        "pointCount": 2,
+        "chunkCount": 1,
+        "sha256": "0d533c4f18eb714a934236572d6cd408bff9708d541e48ff01e03e39d19a933a"
+      },
+      "detail": {
+        "pointCount": 1,
+        "chunkCount": 1,
+        "sha256": "7fd5d4cef37b998a950b6b330195970523580c3ede69391c3e40e8ad66a10adc"
+      }
+    }
+  ],
+  "sleeps": [
+    {
+      "sourceId": "synthetic-s1",
+      "deviceId": "synthetic",
+      "startTimeMs": 1704067200000,
+      "endTimeMs": 1704092400000,
+      "sourceOffset": "+0000",
+      "stages": [
+        {
+          "startTimeMs": 1704067200000,
+          "endTimeMs": 1704092400000,
+          "key": "PROFESSIONAL_SLEEP_SHALLOW"
+        }
+      ],
+      "raw": {
+        "source": "synthetic"
+      }
+    }
+  ],
+  "protocol": "trailsense-huawei",
+  "schemaVersion": 1
+}

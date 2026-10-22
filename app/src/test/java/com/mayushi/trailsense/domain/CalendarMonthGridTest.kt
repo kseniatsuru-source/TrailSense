@@ -18,6 +18,15 @@ class CalendarMonthGridTest {
         assertEquals(31, cells.count { it.inDisplayedMonth })
     }
 
+    @Test fun `February April August use exactly four five six required weeks`() {
+        listOf(YearMonth.of(2021,2) to 28,YearMonth.of(2026,4) to 35,YearMonth.of(2026,8) to 42).forEach { (month,size) ->
+            val cells=CalendarMonthGrid.cells(month)
+            assertEquals(size,cells.size)
+            assertEquals(month.lengthOfMonth(),cells.count {it.inDisplayedMonth})
+            assertEquals(1,cells.first().date.dayOfWeek.value)
+            assertEquals(7,cells.last().date.dayOfWeek.value)
+        }
+    }
     @Test fun `context markers include ranges covering selected day`() {
         val day = LocalDate.of(2026, 8, 17)
         val contexts = listOf(

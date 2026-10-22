@@ -9,6 +9,8 @@ import com.mayushi.trailsense.domain.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -16,19 +18,25 @@ import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 
-class TrailRepository(private val dao: TrailDao, private val resolver: ContentResolver, private val filesDir: File) {
+class TrailRepository(private val dao: TrailDao, private val resolver: ContentResolver, private val filesDir: File,
+    private val refreshPending: suspend () -> Unit = {}) {
     private val writeMutex = Mutex()
-    val routes = dao.observeRoutes()
-    val activities = dao.observeActivities()
+    val routes = dao.observeRoutes().flowOn(Dispatchers.IO)
+    val routeIndex = dao.observeStoredRoutes()
+    val recordingIndex = dao.observeStoredActivities()
+    suspend fun loadRecordedTrack(reference:String):String = withContext(Dispatchers.IO) { requireNotNull(dao.loadTrack(reference)) }
+    val activities = combine(dao.observeActivities(), dao.observeRoutes()) { activities, routes -> activities.map { it.copy(title=DisplayTitle.resolve(it,routes)) } }.flowOn(Dispatchers.IO)
     val companions = dao.observeCompanions()
+    suspend fun refreshExistingPending() = withContext(Dispatchers.IO) { refreshPending() }
     val pillPlan = dao.observePillPlan()
+    val pillPlanVersions = dao.observePillPlanVersions()
     val pillEvents = dao.observePillEvents()
     val calendarContexts = dao.observeCalendarContexts()
     val pendingAiCount = dao.observePendingAiCount()
 
     fun route(id: Long) = dao.observeRoute(id)
-    fun activity(id: Long) = dao.observeActivity(id)
-    fun activitiesForRoute(routeId: Long) = dao.observeActivitiesForRoute(routeId)
+    fun activity(id: Long) = combine(dao.observeActivity(id),dao.observeRoutes()) { a,routes -> a?.copy(title=DisplayTitle.resolve(a,routes)) }
+    fun activitiesForRoute(routeId: Long) = combine(dao.observeActivitiesForRoute(routeId),dao.observeRoutes()) { activities,routes -> activities.map {it.copy(title=DisplayTitle.resolve(it,routes))} }
     fun companionIds(activityId: Long) = dao.observeCompanionIds(activityId)
     fun paceSegments(activityId: Long) = dao.observePaceSegments(activityId)
     fun latestAi(type: String, id: Long, kind: String) = dao.observeLatestAi(type, id, kind)
@@ -44,7 +52,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
             title = title.trim().ifBlank { shared?.suggestedTitle ?: "Поход с часов" },
             sourceUrl = shared?.originalUrl,
             canonicalUrl = null,
-            sourceLabel = if (shared == null) "Часы" else "AllTrails",
+            sourceLabel = (if (shared == null) "Часы" else "AllTrails") + if(title.isNotBlank()) "; CUSTOM_TITLE" else "",
         ))
     }
 
@@ -106,15 +114,14 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
                 averageHeartRateBpm = metrics.averageHeartRateBpm,
                 maxHeartRateBpm = metrics.maxHeartRateBpm,
                 matchConfidence = best?.second?.confidence,
-                comment = best?.takeIf { it.second.shouldSuggest }?.let {
-                    "Предложенное совпадение: ${it.first.title} (подтверди вручную)"
-                } ?: "",
+                // Suggestions belong to metadata, never prefill the user's notes.
+                comment = "",
                 createdAt = now,
                 updatedAt = now,
             )
         }
         val activityId = if (existing != null) {
-            dao.updateActivity(activity)
+            dao.replaceWatchActivity(existing, activity)
             existing.id
         } else {
             dao.insertActivity(activity)
@@ -126,7 +133,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
                 distanceM = selectedRoute.distanceM ?: metrics.distanceM,
                 elevationGainM = selectedRoute.elevationGainM ?: metrics.elevationGainM,
                 elevationLossM = selectedRoute.elevationLossM ?: metrics.elevationLossM,
-                sourceLabel = "AllTrails + ${parsed.sourceFormat.name} с часов",
+                sourceLabel = "AllTrails + ${parsed.sourceFormat.name} с часов" + if(selectedRoute.sourceLabel.contains("CUSTOM_TITLE") || selectedRoute.sourceLabel == "Вручную") "; CUSTOM_TITLE" else "",
                 updatedAt = System.currentTimeMillis(),
             ))
         }
@@ -157,7 +164,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
             distanceM = 0.0,
             elevationGainM = 0.0,
             elevationLossM = 0.0,
-            comment = "Показатели извлечены со скриншота; проверь их перед сохранением.",
+            comment = "",
         ))
         id to file.absolutePath
     }
@@ -205,8 +212,12 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
 
     suspend fun saveQuestionnaire(form: ActivityEntity, companionIds: Set<Long>, routeForm: RouteEntity? = null) = serializedWrite {
         val current = dao.activity(form.id) ?: error("Поход не найден")
+        // An unseen OCR completion or track edit must not be overwritten by a stale form.
+        require(routeForm == null || current.updatedAt == form.updatedAt) { "Запись обновилась во время заполнения. Открой анкету заново; исходные данные сохранены." }
         HikeAnnotations.validate(form.customRatings, form.pointsOfInterest)
         val merged = current.copy(
+            questionnaireHistory = if(form.questionnaireCompletedAt!=null) DescentEvidence.savedHistory(form.questionnaireHistory) else form.questionnaireHistory,
+            heavyBackpack = form.heavyBackpack,
             customRatings = form.customRatings,
             pointsOfInterest = form.pointsOfInterest,
             overallEffort = form.overallEffort,
@@ -214,7 +225,8 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
             descentEffort = form.descentEffort,
             technicality = form.technicality,
             enjoyment = form.enjoyment,
-            sleepHours = form.sleepHours,
+            // Preserve OCR arriving while an untouched form is saved.
+            sleepHours = if (form.sleepHours == null && current.sleepOcrMinutes != null) current.sleepHours else form.sleepHours,
             sleepQuality = form.sleepQuality,
             feltRested = form.feltRested,
             anomaly = form.anomaly,
@@ -274,9 +286,10 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
     suspend fun recoverAlongTrails(activityId: Long, route: List<TrackPoint>) = serializedWrite {
         val activity = dao.activity(activityId) ?: error("Поход не найден")
         val original = TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
-        require(route.size >= 2 && route.all { it.inferred }) { "Нет маршрута OSM для восстановления" }
+        require(activity.originalMetricsJson != null) { "Исходные показатели часов неизвестны. Импортируй исходную запись заново." }
+        require(route.size >= 2 && route.all { it.inferred }) { "Нет маршрута для восстановления" }
         val estimate = RecoveryEstimator.estimate(route,original)
-        updateCorrectedTrack(activity, estimate.points + original, "INFERRED_START", RecoveryEstimator.summary(estimate) + "\nИсточник геометрии: OSM © contributors, ODbL. Высота только с совпадающей записи; время по сходным уклонам этого же похода. Проходимость не проверена.")
+        updateCorrectedTrack(activity, estimate.points + original, "INFERRED_START", RecoveryEstimator.summary(estimate) + "\nДобавленная часть — восстановленная геометрия, не измерение часов. Время, пульс и исходные показатели записи сохранены; длительность добавленной части неизвестна.")
     }
     private suspend fun updateCorrectedTrack(activity: ActivityEntity, points: List<TrackPoint>, mode: String, note: String, cutDistanceM: Double? = null) {
         val calculated = TrackAnalyzer.analyze(points)
@@ -285,19 +298,8 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         val original = TrackCodec.decode(activity.originalTrackEncoded ?: activity.trackEncoded)
         val metrics = when {
             mode == "NONE" -> originalMetrics!!
-            mode == "INFERRED_START" && originalMetrics != null -> {
-                val addedCount = points.size - original.size
-                val added = RecoveryEstimator.estimate(points.take(addedCount), original)
-                val elapsed = originalMetrics.elapsedSeconds?.let { actual -> added.seconds?.let { actual + it } }
-                val moving = originalMetrics.movingSeconds?.let { actual -> added.seconds?.let { actual + it } }
-                val distance = originalMetrics.distanceM + added.distanceM
-                originalMetrics.copy(distanceM = distance,
-                    elevationGainM = originalMetrics.elevationGainM + (added.gainM ?: 0.0),
-                    elevationLossM = originalMetrics.elevationLossM + (added.lossM ?: 0.0),
-                    elapsedSeconds = elapsed, movingSeconds = moving,
-                    stoppedSeconds = if (elapsed != null && moving != null) elapsed - moving else null,
-                    averagePaceMinutesPerKm = moving?.let { it / 60.0 / (distance / 1000.0) })
-            }
+            // Restored geometry is not a second measurement of the watch recording.
+            mode == "INFERRED_START" && originalMetrics != null -> originalMetrics
             mode == "TRIM" && originalMetrics != null -> {
                 val axis = TrackDistanceAxis.build(original, originalMetrics.distanceM).meters
                 val first = original.indexOf(points.first()).coerceAtLeast(0)
@@ -356,12 +358,57 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         dao.invalidateAiForActivity(activityId)
     }
 
+    suspend fun stageSleepScreenshot(uri: Uri): String = withContext(Dispatchers.IO) { saveNormalizedImage(uri, "sleep_screenshots", "sleep") }
+
+    suspend fun commitSleepScreenshot(activityId:Long, expectedRevision:Long, path:String, minutes:Int?, reason:String) = serializedWrite {
+        val current=dao.activity(activityId) ?: error("Поход не найден")
+        require(current.updatedAt == expectedRevision) { "Поход изменился. Повтори добавление сна: прежние данные сохранены." }
+        require(File(path).isFile) { "Изображение отсутствует" }
+        dao.updateActivityAndInvalidate(current.copy(sleepScreenshotPath=path, sleepOcrMinutes=minutes, sleepOcrStatus=reason,
+            sleepHours=minutes?.div(60.0) ?: current.sleepHours, updatedAt=maxOf(System.currentTimeMillis(),current.updatedAt+1)))
+        // Keep prior image bytes; canceled pending uploads never own that file.
+    }
+
     suspend fun saveSleepScreenshot(activityId: Long, uri: Uri): String = serializedWrite {
         val activity = dao.activity(activityId) ?: error("Поход не найден")
         val path = saveNormalizedImage(uri, "sleep_screenshots", "sleep")
         dao.updateActivityAndInvalidate(activity.copy(sleepScreenshotPath = path, updatedAt = System.currentTimeMillis()))
         activity.sleepScreenshotPath?.takeIf { it != path }?.let { runCatching { File(it).delete() } }
         path
+    }
+
+    suspend fun saveCalendarContext(context: CalendarContextEntity) = serializedWrite {
+        require(context.ongoing || context.endEpochDay >= context.startEpochDay) { "Дата окончания раньше начала" }
+        require(context.note.isNotBlank() || context.type != "NOTE") { "Добавь текст заметки" }
+        val old = if(context.id != 0L) dao.calendarContext(context.id) ?: error("Запись не найдена") else null
+        val updated = context.copy(createdAt = old?.createdAt ?: context.createdAt, updatedAt = maxOf(System.currentTimeMillis(), (old?.updatedAt ?: 0) + 1))
+        if(old == null) dao.insertCalendarContext(updated) else dao.updateCalendarContext(updated)
+        dao.invalidateAllAiCache()
+    }
+    suspend fun savePillRegimen(start: java.time.LocalDate, active: Int, pause: Int,
+        subBlockDays: Int = 21, subBlockCount: Int = 4, effective: java.time.LocalDate = start) = serializedWrite {
+        val plan = PillPlanVersions.normalizedPlan(start, active, pause, subBlockDays, subBlockCount)
+        val revision = maxOf(System.currentTimeMillis(), (dao.pillPlan()?.updatedAt ?: 0) + 1)
+        dao.saveVersionedPillPlan(PillPlanEntity(anchorEpochDay=plan.anchorEpochDay,activeDays=active,breakDays=pause,
+            updatedAt=revision,subBlockDays=plan.subBlockDays,subBlockCount=plan.subBlockCount),
+            PillPlanVersions.effectiveDate(effective).toEpochDay())
+        dao.invalidateAllAiCache()
+    }
+    suspend fun savePillEvent(form: PillEventEntity) = serializedWrite {
+        val old = if(form.id != 0L) dao.pillEvent(form.id) ?: error("Факт не найден") else null
+        if(old == null) dao.insertPillEvent(form) else dao.updatePillEvent(form.copy(createdAt=old.createdAt))
+        dao.pillPlan()?.let { dao.savePillPlan(it.copy(updatedAt = maxOf(System.currentTimeMillis(), it.updatedAt + 1))) }
+        dao.invalidateAllAiCache()
+    }
+    suspend fun applySleepOcr(activityId: Long, path: String, minutes: Int?, reason: String) = serializedWrite {
+        val current = dao.activity(activityId) ?: error("Поход не найден")
+        if(current.sleepScreenshotPath != path) return@serializedWrite // stale replaced image
+        val wasAuto = current.sleepOcrMinutes?.let { kotlin.math.abs((current.sleepHours ?: -1.0) - it / 60.0) < 0.001 } == true
+        val conflict = minutes != null && current.sleepHours != null && !wasAuto && kotlin.math.abs(current.sleepHours-minutes/60.0)>0.001
+        dao.updateActivityAndInvalidate(current.copy(sleepOcrMinutes=minutes,
+            sleepOcrStatus=if(conflict) "CONFLICT: $reason" else reason,
+            sleepHours=if(minutes != null && (current.sleepHours==null || wasAuto)) minutes/60.0 else current.sleepHours,
+            updatedAt=maxOf(System.currentTimeMillis(),current.updatedAt+1)))
     }
 
     suspend fun addCalendarContext(context: CalendarContextEntity) = serializedWrite {
@@ -372,12 +419,16 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
     }
     suspend fun deleteCalendarContext(context: CalendarContextEntity) = serializedWrite {
         dao.deleteCalendarContext(context)
-        dao.touchCalendarContextsInRange(context.startEpochDay, context.endEpochDay, maxOf(System.currentTimeMillis(), context.updatedAt + 1))
+        dao.touchCalendarContextsInRange(context.startEpochDay, if(context.ongoing) maxOf(context.endEpochDay, java.time.LocalDate.now().toEpochDay()) else context.endEpochDay, maxOf(System.currentTimeMillis(), context.updatedAt + 1))
         dao.invalidateAllAiCache()
     }
-    suspend fun addCompanion(name: String): Long = withContext(Dispatchers.IO) { dao.insertCompanion(CompanionEntity(name = name.trim())) }
-    suspend fun savePillPlan(plan: PillPlanEntity) = serializedWrite {
-        dao.savePillPlan(plan.copy(updatedAt = System.currentTimeMillis()))
+    suspend fun addCompanion(name: String): Long = withContext(Dispatchers.IO) { dao.createUniqueCompanion(name) }
+    suspend fun savePillPlan(plan: PillPlanEntity, effective: java.time.LocalDate = java.time.LocalDate.now()) = serializedWrite {
+        PillPlanVersions.normalizedPlan(java.time.LocalDate.ofEpochDay(plan.anchorEpochDay), plan.activeDays, plan.breakDays,
+            if (plan.subBlockDays == 0) { if (plan.activeDays == 84) 21 else plan.activeDays } else plan.subBlockDays,
+            if (plan.subBlockCount == 0) { if (plan.activeDays == 84) 4 else 1 } else plan.subBlockCount)
+        dao.saveVersionedPillPlan(plan.copy(updatedAt = maxOf(System.currentTimeMillis(), (dao.pillPlan()?.updatedAt ?: 0) + 1)),
+            PillPlanVersions.effectiveDate(effective).toEpochDay())
         dao.invalidateAllAiCache()
     }
     suspend fun addPillEvent(event: PillEventEntity) = serializedWrite {
@@ -394,7 +445,7 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
     suspend fun calendarContextsForActivityOnce(activity: ActivityEntity?): List<CalendarContextEntity> = withContext(Dispatchers.IO) {
         activity?.startedAt?.let { timestamp ->
             val day = Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay()
-            dao.calendarContextsForDay(day)
+            dao.calendarContextsForDay(day).filter { !it.ongoing || day <= java.time.LocalDate.now().toEpochDay() }
         }.orEmpty()
     }
     suspend fun calendarContextRevisionForActivityOnce(activity: ActivityEntity?): Long? = withContext(Dispatchers.IO) {
@@ -404,11 +455,15 @@ class TrailRepository(private val dao: TrailDao, private val resolver: ContentRe
         }
     }
     suspend fun pillPlanOnce() = withContext(Dispatchers.IO) { dao.pillPlan() }
+    suspend fun pillPlanForActivity(activity: ActivityEntity?) = withContext(Dispatchers.IO) {
+        val day = activity?.manualDateEpochDay?.let(java.time.LocalDate::ofEpochDay) ?: activity?.startedAt?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
+        day?.let { PillPlanVersions.forDate(dao.pillPlanVersions(),dao.pillPlan(),it) }
+    }
 
     suspend fun invalidateAllAiCache() = serializedWrite { dao.invalidateAllAiCache() }
 
     private suspend fun <T> serializedWrite(block: suspend () -> T): T =
-        withContext(Dispatchers.IO) { writeMutex.withLock { block() } }
+        withContext(Dispatchers.IO) { writeMutex.withLock { val result = block(); refreshPending(); result } }
 
     private fun displayName(uri: Uri): String {
         resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->

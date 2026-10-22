@@ -1,6 +1,7 @@
 package com.mayushi.trailsense
 
 import android.app.Application
+import androidx.room.withTransaction
 import com.mayushi.trailsense.data.TrailDatabase
 import com.mayushi.trailsense.data.TrailRepository
 import com.mayushi.trailsense.exchange.TelegramExchangeManager
@@ -10,7 +11,9 @@ import org.osmdroid.config.Configuration
 
 class TrailSenseApplication : Application() {
     val database by lazy { TrailDatabase.get(this) }
-    val repository by lazy { TrailRepository(database.trailDao(), contentResolver, filesDir) }
+    val repository by lazy { TrailRepository(database.trailDao(), contentResolver, filesDir) {
+        database.withTransaction { PendingAnalysisRefresh(database.trailDao(), preferences).refresh() }
+    } }
     val preferences by lazy { AppPreferences(this) }
     val secretStore by lazy { SecureSecretStore(this) }
     val hermesClient by lazy { HermesClient() }

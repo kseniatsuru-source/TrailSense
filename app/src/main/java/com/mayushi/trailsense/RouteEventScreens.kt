@@ -20,7 +20,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -41,7 +44,7 @@ private val watchFileTypes = arrayOf(
     "text/xml",
     "application/octet-stream",
 )
-const val HIKE_LONG_PRESS_MS = 1200L
+const val HIKE_LONG_PRESS_MS = 2000L
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -60,6 +63,7 @@ fun EventsScreen(vm: AppViewModel, open: (Long) -> Unit) {
     }
     val latestByRoute = remember(activities) { EventChronology.latestActivityByRoute(activities) }
     val chronologicalRoutes = remember(routes, activities) { EventChronology.sortRoutes(routes, activities) }
+    val busy by vm.busy.collectAsStateWithLifecycle()
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -133,39 +137,35 @@ fun EventsScreen(vm: AppViewModel, open: (Long) -> Unit) {
 
     }
     deleteTarget?.let { target ->
-        if (!confirmDelete) AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text(target.title) },
-            confirmButton = { TextButton(onClick = { confirmDelete = true }) { Text("Удалить хайк") } },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Отмена") } })
-        else DeleteHikeDialog({ deleteTarget = null }) { vm.deleteEvent(target.id) {}; deleteTarget = null }
+        DeleteHikeDialog({ deleteTarget = null }) { vm.deleteEvent(target.id) {}; deleteTarget = null }
     }
     if (showCreate) CreateEventDialog(
         onDismiss = { showCreate = false },
-        onCreate = { title, link, file -> vm.createEvent(title, link, file); showCreate = false },
+        busy = busy,
+        onCreate = { title, link, file -> vm.createEvent(title, link, file) { showCreate = false } },
     )
     missingLinkRoute?.let { route ->
-        AddAllTrailsDialog(route, onDismiss = { missingLinkRoute = null }) { updated ->
-            vm.saveRoute(updated)
-            missingLinkRoute = null
-        }
+        val activity = latestByRoute[route.id] ?: ActivityEntity(title=route.title, sourceFileName="", sourceFormat="", trackEncoded="", distanceM=0.0, elevationGainM=0.0, elevationLossM=0.0)
+        RouteSearchDialog(route, activity, vm) { missingLinkRoute = null }
     }
 }
 
 @Composable
 private fun DeleteHikeDialog(dismiss: () -> Unit, delete: () -> Unit) {
-    AlertDialog(onDismissRequest = dismiss, title = { Text("Удалить хайк?") },
+    ImeAlertDialog(onDismissRequest = dismiss, title = { Text("Удалить хайк?") },
         text = { Text("Трек, анкета и анализы этого хайка будут удалены.") },
         confirmButton = { Button(onClick = delete, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Удалить") } },
         dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } })
 }
 
 @Composable
-private fun CreateEventDialog(onDismiss: () -> Unit, onCreate: (String, String, Uri?) -> Unit) {
+private fun CreateEventDialog(onDismiss: () -> Unit, busy: Boolean = false, onCreate: (String, String, Uri?) -> Unit) {
     var title by remember { mutableStateOf("") }
     var link by remember { mutableStateOf("") }
     var watchFile by remember { mutableStateOf<Uri?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
     val pickWatch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { watchFile = it }
-    AlertDialog(
+    ImeAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новый хайк") },
         text = {
@@ -177,7 +177,7 @@ private fun CreateEventDialog(onDismiss: () -> Unit, onCreate: (String, String, 
                     Spacer(Modifier.width(8.dp))
                     Text(watchFile?.lastPathSegment?.substringAfterLast('/') ?: "Добавить GPX / TCX с часов")
                 }
-                Text("Дата и фактические показатели будут взяты только из файла часов.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                InfoHint("Файл часов", "Дата и фактические показатели будут взяты только из файла часов.")
                 localError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -186,7 +186,7 @@ private fun CreateEventDialog(onDismiss: () -> Unit, onCreate: (String, String, 
                 if (link.isBlank() && watchFile == null) localError = "Выбери файл часов или ссылку"
                 else if (link.isNotBlank() && com.mayushi.trailsense.data.AllTrailsImport.parseSharedText(link) == null) localError = "Некорректная ссылка AllTrails"
                 else onCreate(title, link, watchFile)
-            }) { Text("Создать") }
+            }, enabled = !busy) { Text("Создать") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
@@ -195,7 +195,7 @@ private fun CreateEventDialog(onDismiss: () -> Unit, onCreate: (String, String, 
 @Composable
 private fun AddAllTrailsDialog(route: RouteEntity, onDismiss: () -> Unit, save: (RouteEntity) -> Unit) {
     var link by remember { mutableStateOf(route.sourceUrl.orEmpty()) }
-    AlertDialog(
+    ImeAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Маршрут на AllTrails") },
         text = { OutlinedTextField(link, { link = it }, Modifier.fillMaxWidth(), label = { Text("Ссылка") }, singleLine = true) },
@@ -207,13 +207,13 @@ private fun AddAllTrailsDialog(route: RouteEntity, onDismiss: () -> Unit, save: 
 @Composable
 fun AttachSharedFileDialog(uri: Uri, routes: List<RouteEntity>, vm: AppViewModel) {
     var selectedRouteId by remember { mutableStateOf<Long?>(routes.firstOrNull()?.id) }
-    AlertDialog(
+    ImeAlertDialog(
         onDismissRequest = vm::dismissSharedFile,
         title = { Text("К какому хайку добавить файл?") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(uri.lastPathSegment?.substringAfterLast('/') ?: "Файл с часов")
-                OutlinedButton(onClick = { vm.createEvent("", "", uri); vm.dismissSharedFile() }) { Text("Создать отдельный хайк из файла") }
+                OutlinedButton(onClick = { vm.createEvent("", "", uri) { vm.dismissSharedFile() } }) { Text("Создать отдельный хайк из файла") }
                 if (routes.isNotEmpty()) RouteChoice(routes, selectedRouteId) { selectedRouteId = it }
             }
         },
@@ -231,17 +231,19 @@ fun RouteEventDetail(
     onEditRequestConsumed: () -> Unit = {},
     deleteRequested: Boolean = false,
     onDeleteRequestConsumed: () -> Unit = {},
+    selectedRecordingId: Long? = null,
 ) {
     val route by vm.route(id).collectAsStateWithLifecycle(null)
     val linkedActivities by vm.activitiesForRoute(id).collectAsStateWithLifecycle(emptyList())
-    val aiShort by vm.latestAi("ROUTE", id, "SHORT_ROUTE").collectAsStateWithLifecycle(null)
-    val aiDeep by vm.latestAi("ROUTE", id, "DEEP_ROUTE").collectAsStateWithLifecycle(null)
     val currentRoute = route ?: return EmptyState("Загрузка", "")
-    val watchActivity = linkedActivities.firstOrNull { it.startedAt != null } ?: linkedActivities.firstOrNull()
+    val watchActivity = if(selectedRecordingId!=null) linkedActivities.firstOrNull{it.id==selectedRecordingId} else linkedActivities.firstOrNull { it.startedAt != null } ?: linkedActivities.firstOrNull()
+    val aiShort by vm.latestAi(if(watchActivity != null) "ACTIVITY" else "ROUTE", watchActivity?.id ?: id, "SHORT_ROUTE").collectAsStateWithLifecycle(null)
+    val aiDeep by vm.latestAi(if(watchActivity != null) "ACTIVITY" else "ROUTE", watchActivity?.id ?: id, "DEEP_ROUTE").collectAsStateWithLifecycle(null)
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var showTrackTools by remember { mutableStateOf(false) }
     var searchRoute by remember { mutableStateOf(false) }
+    var autoSearch by remember { mutableStateOf(false) }
     var showAnalysisChoice by remember { mutableStateOf(false) }
     val pickWatch = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.importWatchFile(id, it) } }
     val context = LocalContext.current
@@ -253,17 +255,22 @@ fun RouteEventDetail(
         }
     }
 
+    val detailScroll = rememberScrollState()
+    var viewportTop by remember { mutableFloatStateOf(0f) }
+    // This viewport already sits below Scaffold's topbar. One eager page keeps all drafts composed.
+    Box(Modifier.fillMaxSize().onGloballyPositioned { viewportTop = it.positionInRoot().y }) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        Modifier.fillMaxSize().verticalScroll(detailScroll).padding(16.dp).testTag("recording-detail-${watchActivity?.id ?: 0}"),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(currentRoute.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        watchActivity?.let { ManualHikeDate(it, vm) }
 
         if (watchActivity == null) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Добавь файл часов", fontWeight = FontWeight.Bold)
-                    Text("Дата, трек, расстояние, набор и время будут рассчитаны локально.")
+                    InfoHint("Файл часов", "Дата, трек, расстояние, набор и время будут рассчитаны локально.")
                     Button(onClick = { pickWatch.launch(watchFileTypes) }, Modifier.fillMaxWidth()) { Icon(Icons.Default.Watch, null); Spacer(Modifier.width(8.dp)); Text("Выбрать GPX / TCX") }
                 }
             }
@@ -274,69 +281,59 @@ fun RouteEventDetail(
                 ElevationProfile(points, Modifier.fillMaxWidth(), displayedRecordedDistance(watchActivity,points))
             }
             FlowMetrics(watchActivity)
-            ManualHikeDate(watchActivity, vm)
-            if (watchActivity.trackCorrectionMode == "INFERRED_START") watchActivity.originalMetricsJson?.let { snapshot ->
-                var aboutRecovery by remember { mutableStateOf(false) }
-                Text(watchActivity.trackCorrectionNote.substringBefore("\n"), color = Forest)
-                TextButton(onClick = { aboutRecovery = !aboutRecovery }) { Text("О восстановлении") }
-                if (aboutRecovery) {
-                val recorded = com.mayushi.trailsense.data.OriginalWatchMetrics.decode(snapshot)
-                Text("Записано часами: ${km(recorded.distanceM)} · +${recorded.elevationGainM.roundToInt()} м · −${recorded.elevationLossM.roundToInt()} м · ${recorded.elapsedSeconds?.let(::duration) ?: "—"}")
-                Text("Итог: запись + известная часть оценки; неизвестный набор и время не подставляются.", color = Coral)
-                Text(watchActivity.trackCorrectionNote, style = MaterialTheme.typography.bodySmall)
-                }
+            OutlinedButton(onClick = { showTrackTools = !showTrackTools }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                Text("Редактировать трек", fontWeight = FontWeight.Normal)
+                Icon(if(showTrackTools) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Коррекция записи")
             }
-        }
-
-        currentRoute.sourceUrl?.takeIf { it.isNotBlank() }?.let { url ->
-            Button(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, Modifier.fillMaxWidth()) {
-                Icon(Icons.AutoMirrored.Filled.OpenInNew, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Маршрут на AllTrails")
-            }
-        }
-
-        if (watchActivity != null) {
-            OutlinedButton(onClick = { searchRoute = true }, Modifier.fillMaxWidth()) { Text("Найти и подтвердить AllTrails") }
-            CompanionSummary(watchActivity, vm)
-            Card(Modifier.fillMaxWidth()) {
-              Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth().clickable { showTrackTools = !showTrackTools }, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Коррекция записи", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    Icon(if (showTrackTools) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "Развернуть коррекцию")
-                }
             if (showTrackTools) {
                 TrackCorrectionPanel(watchActivity, vm)
-                OutlinedButton(onClick = { pickWatch.launch(watchFileTypes) }, Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Sync, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Заменить файл часов")
-                }
+                OutlinedButton(onClick = { pickWatch.launch(watchFileTypes) }) { Text("Заменить файл часов", fontWeight = FontWeight.Normal) }
             }
-              }
+            if (watchActivity.trackCorrectionMode == "INFERRED_START") {
+                Text(watchActivity.trackCorrectionNote.substringBefore("\n"), color = Forest)
+                InfoHint("О восстановлении", "Исходная запись и показатели часов сохранены отдельно. Добавленное начало — оценка. Неизвестные время и набор не подставляются; итог может быть неполным. Коррекцию можно отменить кнопкой «Вернуть исходный трек».")
             }
-            HikeQuestionnaire(currentRoute, watchActivity, vm)
         }
 
-        SectionTitle("Анализ Mayushi")
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = {
+                val url = currentRoute.sourceUrl
+                if (url.isNullOrBlank()) { searchRoute = true; autoSearch = false }
+                else runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+            }, modifier = Modifier.weight(1f)) {
+                Text(if (currentRoute.sourceUrl.isNullOrBlank()) "Маршрут на AllTrails" else "AllTrails · ${currentRoute.title} ↗", fontWeight = FontWeight.Normal)
+            }
+            IconButton(onClick = { searchRoute = true; autoSearch = false }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Edit, "Изменить маршрут AllTrails") }
+        }
+        if (watchActivity != null) {
+            WatchDetails041(watchActivity,vm)
+            HikeQuestionnaire037(currentRoute, watchActivity, vm, history = watchActivity.questionnaireHistory,
+                listScrollState = detailScroll, viewportTopInRoot = viewportTop,
+                suggestedSleepHours = watchActivity.sleepOcrMinutes?.div(60.0),
+                onSave = { r, a, ids, history, callback -> vm.saveHikeQuestionnaire(r, a.copy(questionnaireHistory=history), ids, emptyList(), callback) })
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Анализ Mayushi", Modifier.weight(1f))
+            InfoHint("Анализ Mayushi", "Отправь показатели этого хайка и выбранный контекст на анализ, когда захочешь. Готовые ответы остаются здесь. Новые задания не создаются автоматически.")
+        }
         val analysis = aiDeep ?: aiShort
         if (analysis != null) AiCard(analysis.response, analysis.promptTokens, analysis.completionTokens)
-        else Card(colors = CardDefaults.cardColors(containerColor = Coral.copy(alpha = .12f))) {
-            Text("Анализ появится здесь после отправки очереди Mayushi.", Modifier.padding(16.dp))
-        }
         OutlinedButton(onClick = { showAnalysisChoice = true }, Modifier.fillMaxWidth(), enabled = watchActivity != null) {
             Icon(Icons.Default.AutoAwesome, null)
             Spacer(Modifier.width(8.dp))
-            Text("Обновить персональный анализ")
+            Text("Отправить на анализ", fontWeight = FontWeight.Normal)
         }
 
 
     }
 
-    if (showAnalysisChoice) HikeAnalysisChoice(id, vm) { showAnalysisChoice = false }
-    if (searchRoute && watchActivity != null) RouteSearchDialog(currentRoute, watchActivity, vm) { searchRoute = false }
+    }
+    if (showAnalysisChoice && watchActivity != null) HikeAnalysisChoice(watchActivity.id, vm) { showAnalysisChoice = false }
+    if (searchRoute && watchActivity != null) RouteSearchDialog(currentRoute, watchActivity, vm, autoStart = autoSearch) { searchRoute = false }
+    if (searchRoute && watchActivity == null) RouteSearchDialog(currentRoute, ActivityEntity(title=currentRoute.title, sourceFileName="", sourceFormat="", trackEncoded="", distanceM=0.0, elevationGainM=0.0, elevationLossM=0.0), vm) { searchRoute = false }
     if (showEditDialog) EditHikeDialog(currentRoute, vm, { showEditDialog = false })
-    if (showDeleteConfirmation) AlertDialog(
+    if (showDeleteConfirmation) ImeAlertDialog(
         onDismissRequest = { showDeleteConfirmation = false },
         icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
         title = { Text("Удалить хайк?") },
@@ -347,71 +344,18 @@ fun RouteEventDetail(
 }
 
 @Composable
-internal fun RouteSearchDialog(route: RouteEntity, activity: ActivityEntity, vm: AppViewModel, initialCandidates: List<com.mayushi.trailsense.network.AllTrailsMcpClient.Candidate> = emptyList(), dismiss: () -> Unit) {
-    val context = LocalContext.current
-    val points = remember(activity.trackEncoded) { TrackCodec.decode(activity.trackEncoded) }
-    val area = remember(points) { runCatching { com.mayushi.trailsense.network.AllTrailsMcpClient.Area.from(points) }.getOrNull() }
-    var query by remember { mutableStateOf("") }
-    var link by remember { mutableStateOf(route.sourceUrl.orEmpty()) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var candidates by remember { mutableStateOf(initialCandidates) }
-    var searching by remember { mutableStateOf(false) }
-    var attempt by remember { mutableIntStateOf(0) }
-    LaunchedEffect(attempt) {
-        if(attempt > 0 && area != null) {
-            searching = true; error = null
-            try { candidates = com.mayushi.trailsense.network.AllTrailsMcpClient().search(area, activity.distanceM, activity.elevationGainM) }
-            catch(e: kotlinx.coroutines.CancellationException) { throw e }
-            catch(e: Exception) { error = e.message ?: "Поиск недоступен" }
-            finally { searching = false }
-        }
-    }
-    AlertDialog(onDismissRequest = dismiss, title = { Text("Поиск AllTrails") }, text = {
-        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Часы: ${km(activity.distanceM)} · +${activity.elevationGainM.roundToInt()} м. Подтверждение ссылки не меняет запись часов.")
-            area?.let { Text("AllTrails получит округлённую расширенную область: %.2f–%.2f° N, %.2f–%.2f° E и приблизительную длину. Точки GPS, пульс, сон и путники не отправляются.".format(it.south,it.north,it.west,it.east)) }
-            Button(onClick = { candidates = emptyList(); attempt++ }, enabled = area != null && !searching) { Text(if(searching) "Поиск…" else "Найти кандидатов автоматически") }
-            if(searching) LinearProgressIndicator(Modifier.fillMaxWidth())
-            error?.let { Text("$it. Это не означает, что маршрутов нет.", color = MaterialTheme.colorScheme.error) }
-            if(attempt > 0 && !searching && error == null && candidates.isEmpty()) Text("Этот запрос не вернул кандидатов. Можно поискать в браузере.")
-            candidates.forEach { c ->
-                Card(Modifier.fillMaxWidth().clickable { link = c.url }) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(c.name, fontWeight = FontWeight.Bold)
-                        TextButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(c.url))) }.onFailure { error = "Не удалось открыть браузер" } }, enabled = com.mayushi.trailsense.network.AllTrailsMcpClient.validRouteUrl(c.url)) { Text("Открыть кандидата в браузере") }
-                        Text(listOfNotNull(c.length?.let(::km), c.gain?.let { "+${it.roundToInt()} м" }, c.type.takeIf { it.isNotBlank() }).joinToString(" · "))
-                        c.length?.let { Text("Разница с часами: %.2f км".format((it-activity.distanceM)/1000)) }
-                        Text("Кандидат из района GPS. Совпадение трека не доказано: AllTrails не вернул геометрию.", style = MaterialTheme.typography.bodySmall)
-                        if(c.description.isNotBlank()) {
-                            var expanded by remember(c.id) { mutableStateOf(false) }
-                            TextButton(onClick = { expanded = !expanded }) { Text("Описание и ориентиры AllTrails") }
-                            if(expanded) Text(c.description, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Text(if(link == c.url) "Выбран, подтверди ниже" else "Нажми, чтобы выбрать", color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            OutlinedTextField(query, { query = it }, label = { Text("Ручной поиск: район / ориентиры") })
-            OutlinedButton(onClick = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode("site:alltrails.com/trail/ " + query)))) }.onFailure { error = "Не удалось открыть браузер" } }, enabled = query.isNotBlank()) { Text("Открыть поиск в браузере") }
-            OutlinedTextField(link, { link = it }, label = { Text("Выбранная ссылка AllTrails") })
-            Text("Источник: официальный AllTrails MCP. Описания временные, сохраняются подтверждённая ссылка и название выбранного кандидата.", style = MaterialTheme.typography.bodySmall)
-        }
-    }, confirmButton = { Button(onClick = { val candidate = candidates.firstOrNull { it.url == link.trim() }; vm.saveRoute(route.copy(title = candidate?.name ?: route.title, sourceUrl = link.trim(), sourceLabel = candidate?.let { "AllTrails MCP:${it.id}" } ?: "AllTrails: подтверждено вручную")); dismiss() }, enabled = com.mayushi.trailsense.network.AllTrailsMcpClient.validRouteUrl(link.trim())) { Text("Подтвердить") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } })
-}
-
-@Composable
 private fun EditHikeDialog(route: RouteEntity, vm: AppViewModel, dismiss: () -> Unit) {
     var edit by remember(route.updatedAt) { mutableStateOf(route) }
-    AlertDialog(
+    ImeAlertDialog(
         onDismissRequest = dismiss,
         title = { Text("Изменить хайк") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(edit.title, { edit = edit.copy(title = it) }, Modifier.fillMaxWidth(), label = { Text("Название") })
                 OutlinedTextField(edit.sourceUrl.orEmpty(), { edit = edit.copy(sourceUrl = it) }, Modifier.fillMaxWidth(), label = { Text("Ссылка AllTrails") })
             }
         },
-        confirmButton = { Button(onClick = { vm.saveRoute(edit); dismiss() }) { Text("Сохранить") } },
+        confirmButton = { Button(onClick = { vm.saveRoute(edit.copy(sourceLabel=edit.sourceLabel + if(edit.title != route.title) "; CUSTOM_TITLE" else "")); dismiss() }) { Text("Сохранить") } },
         dismissButton = { TextButton(onClick = dismiss) { Text("Отмена") } },
     )
 }
@@ -422,9 +366,9 @@ private fun ManualHikeDate(activity: ActivityEntity, vm: AppViewModel) {
     var selected by remember(activity.startedAt) { mutableStateOf(activity.startedAt?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalDate() } ?: java.time.LocalDate.now()) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(activity.startedAt?.let(::dateFromMs) ?: "—", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-        IconButton(onClick = { choosing = true }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.EditCalendar, "Исправить дату", Modifier.size(18.dp)) }
+        IconButton(onClick = { choosing = true }, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.EditCalendar, "Исправить дату", Modifier.size(18.dp)) }
     }
-    if (choosing) AlertDialog(onDismissRequest = { choosing = false }, title = { Text("Настоящий день похода") },
+    if (choosing) ImeAlertDialog(onDismissRequest = { choosing = false }, title = { Text("Настоящий день похода") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) { DateButton(selected) { selected = it }; TextButton(onClick = { vm.setManualDate(activity.id, null); choosing = false }) { Text("Вернуть дату файла") } } },
         confirmButton = { Button(onClick = { vm.setManualDate(activity.id, selected); choosing = false }) { Text("Подтвердить дату") } },
         dismissButton = { TextButton(onClick = { choosing = false }) { Text("Отмена") } })
@@ -436,8 +380,6 @@ private fun CompanionSummary(activity: ActivityEntity, vm: AppViewModel) {
     val ids by vm.companionIds(activity.id).collectAsStateWithLifecycle(emptyList())
     val names = companions.filter { it.id in ids }.map { it.name }
     var editing by remember { mutableStateOf(false) }
-    var selected by remember(ids) { mutableStateOf(ids.toSet()) }
-    var newName by remember { mutableStateOf("") }
     Card(Modifier.fillMaxWidth().clickable { editing = true }) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -455,15 +397,7 @@ private fun CompanionSummary(activity: ActivityEntity, vm: AppViewModel) {
             }
         }
     }
-    if (editing) AlertDialog(onDismissRequest = { editing = false }, title = { Text("Путники") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            companions.forEach { c -> FilterChip(c.id in selected, { selected = if (c.id in selected) selected - c.id else selected + c.id }, { Text(c.name) }) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(newName, { newName = it }, Modifier.weight(1f), label = { Text("Новый путник") })
-                IconButton(onClick = { vm.addCompanion(newName); newName = "" }) { Icon(Icons.Default.PersonAdd, "Добавить") }
-            }
-        }
-    }, confirmButton = { Button(onClick = { vm.saveCompanions(activity.id, selected); editing = false }) { Text("Сохранить") } }, dismissButton = { TextButton(onClick = { editing = false; selected = ids.toSet() }) { Text("Отмена") } })
+    if (editing) CompanionPicker041(vm,ids.toSet(),{editing=false}) { chosen -> vm.saveCompanions(activity.id,chosen);editing=false }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -477,12 +411,6 @@ private fun TrackCorrectionPanel(activity: ActivityEntity, vm: AppViewModel) {
     val totalKm = (cumulative.lastOrNull() ?: 0.0).div(1000).toFloat()
     if (totalKm <= 0f || original.size < 2) return
     var range by remember(activity.id, totalKm) { mutableStateOf(0f..totalKm) }
-    var recoveryPreview by remember(activity.updatedAt) { mutableStateOf<List<com.mayushi.trailsense.domain.TrackPoint>?>(null) }
-    var recoveryError by remember { mutableStateOf<String?>(null) }
-    var about by remember { mutableStateOf(false) }
-    var manualJoin by remember { mutableStateOf(totalKm * .97f) }
-    fun joinIndex() = com.mayushi.trailsense.domain.TrackGeometry.indexAtDistance(cumulative, manualJoin * 1000.0)
-    var manual by remember { mutableStateOf(false) }
     var showRouting by remember { mutableStateOf(false) }
     if (showRouting) RecoveryRouteDialog(original, recordedDistance(activity), { vm.recoverAlongTrails(activity.id, it) }) { showRouting = false }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -497,111 +425,8 @@ private fun TrackCorrectionPanel(activity: ActivityEntity, vm: AppViewModel) {
             OutlinedButton(onClick = { showRouting = true }, Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Restore, null); Spacer(Modifier.width(8.dp)); Text("Восстановить начало по тропам")
             }
-            TextButton(onClick = { about = !about }) { Text("О восстановлении") }
-            if (about) Text(com.mayushi.trailsense.domain.TrackDistanceAxis.build(trimBaseline, displayedRecordedDistance(activity,trimBaseline)).provenance + ". Исходный GPS и итог часов хранятся отдельно. " + activity.trackCorrectionNote, style = MaterialTheme.typography.labelSmall)
+            InfoHint("Коррекция записи", "Обрезка меняет показанный участок и пересчитывает его показатели. Восстановленное начало — оценка, а не запись часов; неизвестные время и высота не выдумываются. Исходные точки и показатели часов сохраняются: «Вернуть исходный трек» отменяет коррекцию.")
             if (activity.trackCorrectionMode != "NONE") TextButton(onClick = { vm.resetTrackCorrection(activity.id) }, Modifier.fillMaxWidth()) { Text("Вернуть исходный трек") }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-private fun HikeQuestionnaire(route: RouteEntity, activity: ActivityEntity, vm: AppViewModel) {
-    val companions by vm.companions.collectAsStateWithLifecycle()
-    val savedIds by vm.companionIds(activity.id).collectAsStateWithLifecycle(emptyList())
-    val savedSegments by vm.paceSegments(activity.id).collectAsStateWithLifecycle(emptyList())
-    val busy by vm.busy.collectAsStateWithLifecycle()
-    var expanded by remember(activity.id) {
-        mutableStateOf(false)
-    }
-    var editRoute by remember(route.id) { mutableStateOf(route) }
-    var edit by remember(activity.id) { mutableStateOf(activity) }
-    LaunchedEffect(route.updatedAt, activity.updatedAt, expanded) {
-        if (!expanded) {
-            editRoute = route
-            edit = activity
-        }
-    }
-    var selected by remember(savedIds) { mutableStateOf(savedIds.toSet()) }
-    var segments by remember(savedSegments) { mutableStateOf(savedSegments) }
-    var newCompanion by remember { mutableStateOf("") }
-    var customPace by remember { mutableStateOf(false) }
-    var segmentRange by remember { mutableStateOf(0f..1f) }
-    var segmentSetter by remember { mutableStateOf("Я") }
-    var segmentNote by remember { mutableStateOf("") }
-    var selectedSegment by remember { mutableStateOf<Int?>(null) }
-    val sleepImagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { vm.saveSleepScreenshot(activity.id, it) } }
-    val points = remember(activity.trackEncoded) { TrackCodec.decode(activity.trackEncoded) }
-    val selectedNames = companions.filter { it.id in selected }.map { it.name }
-    val setterOptions = (listOf("Я", "Смешанный", "Без спутников") + selectedNames).distinct()
-
-    Card(Modifier.fillMaxWidth().animateContentSize()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Моя анкета", fontWeight = FontWeight.Bold)
-                    if (!expanded) Text(
-                        if (activity.questionnaireCompletedAt != null) "Заполнена · нажми, чтобы изменить" else "Не заполнена · разверни, когда будешь готова",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Свернуть" else "Развернуть") }
-            }
-            if (expanded) {
-                SectionTitle("Впечатления")
-                RatingField("Общая тяжесть маршрута", editRoute.overallDifficulty) { editRoute = editRoute.copy(overallDifficulty = it) }
-                RatingField("Тяжесть набора", editRoute.climbDifficulty) { editRoute = editRoute.copy(climbDifficulty = it) }
-                RatingField("Общая нагрузка", edit.overallEffort) { edit = edit.copy(overallEffort = it) }
-                RatingField("Подъём", edit.climbEffort) { edit = edit.copy(climbEffort = it) }
-                RatingField("Спуск", edit.descentEffort) { edit = edit.copy(descentEffort = it) }
-                RatingField("Техничность", edit.technicality) { edit = edit.copy(technicality = it); editRoute = editRoute.copy(technicality = it) }
-                RatingField("Экспозиция", editRoute.exposure) { editRoute = editRoute.copy(exposure = it) }
-                RatingField("Мои впечатления", edit.enjoyment) { edit = edit.copy(enjoyment = it); editRoute = editRoute.copy(beauty = it) }
-                ChoiceChips(listOf("Тяжелее обычного" to "HARD", "Обычно" to "NORMAL", "Легче обычного" to "EASY"), edit.anomaly) { edit = edit.copy(anomaly = it) }
-
-                SectionTitle("Мои критерии и ориентиры")
-                OutlinedTextField(edit.customRatings, { edit = edit.copy(customRatings = it) }, Modifier.fillMaxWidth(), label = { Text("Критерии: имя | оценка | максимум") }, minLines = 2)
-                Text("Каждая строка — отдельный критерий с твоей шкалой, например: Красота озера | 8 | 10")
-                OutlinedTextField(edit.pointsOfInterest, { edit = edit.copy(pointsOfInterest = it) }, Modifier.fillMaxWidth(), label = { Text("POI: название | широта | долгота") }, minLines = 2)
-                Text("Каждая строка — именованный ориентир, координаты можно взять с карты. Маркеры появятся после сохранения.")
-                SectionTitle("Сон — по моим ощущениям")
-                NumberTextField("Часов сна", edit.sleepHours) { edit = edit.copy(sleepHours = it) }
-                RatingField("Как я оцениваю сон", edit.sleepQuality) { edit = edit.copy(sleepQuality = it) }
-                TriChoice("Выспалась?", listOf("Да" to true, "Нет" to false), edit.feltRested) { edit = edit.copy(feltRested = it) }
-                OutlinedButton(onClick = { sleepImagePicker.launch(arrayOf("image/*")) }, Modifier.fillMaxWidth(), enabled = !busy) {
-                    Icon(Icons.Default.Bedtime, null); Spacer(Modifier.width(8.dp)); Text(if (activity.sleepScreenshotPath == null) "Добавить скриншот сна с часов (необязательно)" else "Заменить скриншот сна")
-                }
-                Text("Mayushi прочитает видимые показатели часов, но твоя собственная оценка сна останется главной.", style = MaterialTheme.typography.labelSmall)
-
-                SectionTitle("Путники и темп")
-                if (companions.isNotEmpty()) FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                ) {
-                    companions.forEach { companion ->
-                        FilterChip(
-                            selected = companion.id in selected,
-                            onClick = { selected = if (companion.id in selected) selected - companion.id else selected + companion.id },
-                            label = { Text(companion.name) },
-                        )
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(newCompanion, { newCompanion = it }, Modifier.weight(1f), label = { Text("Новый путник") }, singleLine = true)
-                    IconButton(onClick = { vm.addCompanion(newCompanion); newCompanion = "" }) { Icon(Icons.Default.PersonAdd, "Добавить") }
-                }
-                StringDropdown("Чьей скоростью шли в целом", setterOptions, paceSetterLabel(edit.paceSetter)) { edit = edit.copy(paceSetter = it) }
-                SwitchRow("Скорость отражает мой обычный темп", edit.representativeSpeed) { edit = edit.copy(representativeSpeed = it) }
-                ChoiceChips(listOf("Свободный" to "FREE", "Чуть медленнее" to "SLIGHT", "Заметно медленнее" to "NOTABLE", "Сильно медленнее" to "MUCH"), edit.paceConstraint) { edit = edit.copy(paceConstraint = it, representativeSpeed = it == "FREE") }
-                SwitchRow("Были ожидания / вынужденные остановки", edit.hadWaitingStops) { edit = edit.copy(hadWaitingStops = it) }
-
-
-                OutlinedTextField(com.mayushi.trailsense.domain.HikeComments.merge(edit.comment, editRoute.notes), { edit = edit.copy(comment = it); editRoute = editRoute.copy(notes = "") }, Modifier.fillMaxWidth(), label = { Text("Комментарий к походу") }, minLines = 3)
-                Button(onClick = {
-                    vm.saveHikeQuestionnaire(editRoute.copy(notes = ""), edit.copy(comment = com.mayushi.trailsense.domain.HikeComments.merge(edit.comment, editRoute.notes)), selected, savedSegments) { expanded = false }
-                }, Modifier.fillMaxWidth(), enabled = !busy) { Text("Сохранить анкету") }
-            }
         }
     }
 }

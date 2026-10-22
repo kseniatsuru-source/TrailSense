@@ -47,11 +47,11 @@ class Release036Test {
         val json="""{"elements":[{"type":"node","id":1,"lat":49,"lon":-123},{"type":"node","id":2,"lat":49.001,"lon":-123},{"type":"way","id":8,"nodes":[1,2],"tags":{"highway":"path","access":"private"}}]}"""
         assertTrue(TrailGraph.parse(json).edges.isEmpty())
     }
-    @Test fun estimatorUsesSameDirectionSimilarGradesNotMirroredReturnTime() {
+    @Test fun estimatorNeverInventsRestorationTime() {
         val recorded=(0..100).map { i -> TrackPoint(49+i*.0001,-123.0,elevationM=i*1.0,timeEpochMs=i*10_000L) }
         val up=recorded.take(50).map { it.copy(inferred=true,timeEpochMs=null) }
         val downhill=up.asReversed()
-        assertNotNull(RecoveryEstimator.estimate(up,recorded).seconds)
+        assertNull(RecoveryEstimator.estimate(up,recorded).seconds)
         assertNull(RecoveryEstimator.estimate(downhill,recorded).seconds)
         assertNotNull(RecoveryEstimator.estimate(downhill,recorded).gainM)
     }

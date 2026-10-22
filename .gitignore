@@ -71,3 +71,11 @@ signing.properties
 /app/src/androidTest/java/com/mayushi/trailsense/AllTrailsLive035Test.kt
 # Local 0.3.6 acceptance reads populated emulator geometry; preserve privately
 /app/src/androidTest/java/com/mayushi/trailsense/RecoveryLive036Test.kt
+
+# Additional private device fixtures and backup/diagnostic harnesses stay local
+/app/src/androidTest/java/com/mayushi/trailsense/RepeatRoutesSection037Test.kt
+/app/src/androidTest/java/com/mayushi/trailsense/Snapshot039Test.kt
+/app/src/androidTest/java/com/mayushi/trailsense/RealFixtures037PrivateTest.kt
+/app/src/androidTest/java/com/mayushi/trailsense/RecoveryFinal037PrivateTest.kt
+/app/src/androidTest/java/com/mayushi/trailsense/Review038PrivateTest.kt
+/app/src/test/java/com/mayushi/trailsense/domain/RecoveryPrivateDiagnosticTest.kt

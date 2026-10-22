@@ -10,164 +10,71 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.mayushi.trailsense.data.CalendarContextEntity
-import com.mayushi.trailsense.data.PillPlanEntity
-import com.mayushi.trailsense.domain.CalendarMonthGrid
-import com.mayushi.trailsense.domain.PillPhase
-import com.mayushi.trailsense.domain.PillPlan
-import com.mayushi.trailsense.domain.PillSchedule
+import com.mayushi.trailsense.data.*
+import com.mayushi.trailsense.domain.*
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun GraphicalMonthCalendar(
-    month: YearMonth,
-    today: LocalDate,
-    contexts: List<CalendarContextEntity>,
-    pillPlan: PillPlanEntity?,
-    pillEvents: List<com.mayushi.trailsense.data.PillEventEntity> = emptyList(),
-    hikeDays: Set<Long> = emptySet(),
-    previousMonth: () -> Unit,
-    nextMonth: () -> Unit,
-    showToday: () -> Unit,
-    selectDay: (LocalDate) -> Unit,
-) {
-    val cells = CalendarMonthGrid.cells(month)
+fun GraphicalMonthCalendar(month: YearMonth, today: LocalDate, contexts: List<CalendarContextEntity>,
+    pillPlan: PillPlanEntity?, pillEvents: List<PillEventEntity> = emptyList(), hikeDays: Set<Long> = emptySet(),
+    pillPlanVersions: List<PillPlanVersionEntity> = emptyList(), previousMonth: () -> Unit, nextMonth: () -> Unit,
+    showToday: () -> Unit, selectDay: (LocalDate) -> Unit,
+    hikeTitles: Map<Long,List<String>> = emptyMap(), visibleCategoryNames:Set<String> = CalendarCategory.entries.map{it.name}.toSet()) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = previousMonth) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Предыдущий месяц") }
-                Text(
-                    month.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale("ru"))).replaceFirstChar { it.titlecase(Locale("ru")) },
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-                IconButton(onClick = nextMonth) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Следующий месяц") }
+                IconButton(previousMonth) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Предыдущий месяц") }
+                Text(month.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale("ru"))), Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                IconButton(nextMonth) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "Следующий месяц") }
             }
-            TextButton(onClick = showToday, Modifier.align(Alignment.CenterHorizontally)) { Text("Сегодня") }
-            Row(Modifier.fillMaxWidth()) {
-                listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach { weekday ->
-                    Text(
-                        weekday,
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                }
-            }
-            cells.chunked(7).forEach { week ->
-                Row(Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth()) { listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс").forEach {
+                Text(it, Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center, style = MaterialTheme.typography.labelSmall)
+            } }
+            CalendarMonthGrid.cells(month).chunked(7).forEach { week ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     week.forEach { cell ->
-                        CalendarDay(
-                            date = cell.date,
-                            inDisplayedMonth = cell.inDisplayedMonth,
-                            isToday = cell.date == today,
-                            hasHike = cell.date.toEpochDay() in hikeDays,
-                            contextTypes = CalendarMonthGrid.contextTypes(cell.date, contexts),
-                            fact = pillEvents.lastOrNull { it.epochDay == cell.date.toEpochDay() },
-                            pillPhase = pillPlan?.let {
-                                PillSchedule.day(PillPlan(it.anchorEpochDay, it.activeDays, it.breakDays), cell.date).phase
-                            },
-                            select = { selectDay(cell.date) },
-                            modifier = Modifier.weight(1f),
-                        )
+                        val date = cell.date
+                        val events = Calendar037.contextsForDate(contexts,date,today).filter{CalendarCategory.context(it).name in visibleCategoryNames}
+                        val strips = mutableListOf<Pair<String,Color>>()
+                        if(CalendarCategory.HIKES.name in visibleCategoryNames) {
+                            val titles=hikeTitles[date.toEpochDay()].orEmpty()
+                            titles.forEach { strips.add(it to CalendarCategory.HIKES.color) }
+                            if(titles.isEmpty() && date.toEpochDay() in hikeDays) strips.add("Хайк" to CalendarCategory.HIKES.color)
+                        }
+                        events.forEach { strips.add(Calendar037.label(it.type) to CalendarCategory.context(it).color) }
+                        val plan=PillPlanVersions.forDate(pillPlanVersions,pillPlan,date)
+                        plan?.let {
+                            val category=if(PillSchedule.day(it.toDomainPlan(),date).phase == PillPhase.ACTIVE) CalendarCategory.ACTIVE else CalendarCategory.BREAK
+                            if(category.name in visibleCategoryNames) strips.add(category.label to category.color)
+                        }
+                        Surface(onClick = { selectDay(date) }, modifier = Modifier.weight(1f).heightIn(min = (64 * LocalDensity.current.fontScale.coerceAtLeast(1f)).dp).semantics {
+                            contentDescription = "$date" + strips.joinToString { it.first }
+                        }, shape = RoundedCornerShape(4.dp), color=Color.Transparent,
+                            border = BorderStroke(if(date == today) 2.dp else 1.dp, if(date == today) Forest else MaterialTheme.colorScheme.outlineVariant)) {
+                            Column(Modifier.padding(2.dp), verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                                Text(date.dayOfMonth.toString(), fontWeight=if(date==today) FontWeight.Bold else FontWeight.Normal,
+                                    color=if(cell.inDisplayedMonth) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                                strips.take(2).forEach { (title,color) ->
+                                    Surface(Modifier.fillMaxWidth(), color=color.copy(alpha=.24f), shape=RoundedCornerShape(2.dp)) {
+                                        Text(title,Modifier.padding(2.dp),style=MaterialTheme.typography.labelSmall,maxLines=1,softWrap=false,overflow=TextOverflow.Ellipsis)
+                                    }
+                                }
+                                if(strips.size>2) Text("+${strips.size-2}",style=MaterialTheme.typography.labelSmall)
+                            }
+                        }
                     }
                 }
             }
-            CalendarLegend(pillPlan != null)
         }
     }
-}
-
-@Composable
-private fun CalendarDay(
-    date: LocalDate,
-    inDisplayedMonth: Boolean,
-    isToday: Boolean,
-    hasHike: Boolean = false,
-    contextTypes: List<String>,
-    pillPhase: PillPhase?,
-    fact: com.mayushi.trailsense.data.PillEventEntity? = null,
-    select: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(10.dp)
-    val baseColor = when {
-        isToday -> MaterialTheme.colorScheme.primaryContainer
-        contextTypes.isNotEmpty() -> MaterialTheme.colorScheme.surfaceVariant
-        else -> Color.Transparent
-    }
-    Surface(
-        onClick = select,
-        modifier = modifier.aspectRatio(1f).padding(1.5.dp),
-        shape = shape,
-        color = baseColor,
-        border = if (isToday) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-    ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 3.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                date.dayOfMonth.toString(),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                color = if (inDisplayedMonth) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = .35f),
-            )
-            fact?.let { Text(if (it.actualTaken == true) "✓" else if (it.actualTaken == false) "×" else "↔", style = MaterialTheme.typography.labelSmall, color = Coral) }
-            if (hasHike) Text("▲", color = Forest, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.weight(1f))
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                contextTypes.take(3).forEach { type ->
-                    Surface(
-                        Modifier.size(6.dp),
-                        shape = RoundedCornerShape(50),
-                        color = contextColor(type),
-                    ) {}
-                }
-            }
-            pillPhase?.let { phase ->
-                Spacer(Modifier.height(2.dp))
-                Surface(
-                    Modifier.fillMaxWidth(.72f).height(3.dp),
-                    shape = RoundedCornerShape(50),
-                    color = if (phase == PillPhase.ACTIVE) Forest else Coral,
-                ) {}
-            }
-        }
-    }
-}
-
-@Composable
-private fun CalendarLegend(showPillPlan: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        LegendItem(contextColor("NOTE"), "Заметка")
-        LegendItem(Forest, "▲ Поход")
-        LegendItem(contextColor("SEVERE_SLEEP_DEBT"), "Сильный недосып")
-        LegendItem(contextColor("HIGH_STRESS"), "Сильный стресс")
-        if (showPillPlan) Text("Полоска — план (зелёная: активные, бирюзовая: перерыв). ✓ принято · × не принято · ↔ отклонение", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun LegendItem(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Surface(Modifier.size(8.dp), shape = RoundedCornerShape(50), color = color) {}
-        Text(label, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-@Composable
-private fun contextColor(type: String): Color = when (type) {
-    "SEVERE_SLEEP_DEBT" -> MaterialTheme.colorScheme.tertiary
-    "HIGH_STRESS" -> Coral
-    else -> MaterialTheme.colorScheme.primary
 }

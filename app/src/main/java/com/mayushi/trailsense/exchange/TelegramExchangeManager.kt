@@ -50,8 +50,17 @@ class TelegramExchangeManager(
 ) {
     private val dao get() = database.trailDao()
 
-    suspend fun createRequestFile(routeId: Long? = null, analysisKind: String? = null): TelegramRequestFile = withContext(Dispatchers.IO) {
-        val snapshot = dao.pendingAiJobs().filter { routeId == null || (it.entityType == "ROUTE" && it.entityId == routeId && (analysisKind == null || it.analysisKind == analysisKind)) }
+    suspend fun createRequestFile(routeId: Long? = null, analysisKind: String? = null, activityId: Long? = null): TelegramRequestFile = withContext(Dispatchers.IO) {
+        require(routeId == null || activityId == null) { "Выбери только один хайк для отправки" }
+        database.withTransaction { PendingAnalysisRefresh(dao, preferences).refresh() }
+        val snapshot = dao.pendingAiJobs().filter {
+            (analysisKind == null || it.analysisKind == analysisKind) &&
+                when {
+                    activityId != null -> it.entityType == "ACTIVITY" && it.entityId == activityId
+                    routeId != null -> it.entityType == "ROUTE" && it.entityId == routeId
+                    else -> true
+                }
+        }
         require(snapshot.isNotEmpty()) { "Очередь анализа пуста" }
         var supersededCount = 0
         val tasks = buildList {
@@ -65,6 +74,7 @@ class TelegramExchangeManager(
                         job.inputHash,
                         (error.message ?: "Задание устарело").take(500),
                         System.currentTimeMillis(),
+                        job.inputRevision,
                     )
                     supersededCount += changed
                 }
@@ -93,7 +103,7 @@ class TelegramExchangeManager(
             require(temporary.renameTo(output)) { "Не удалось завершить файл обмена" }
             val manifest = ExchangeManifest(
                 requestId = requestId,
-                tasks = tasks.map { ExchangeManifestTask(it.job.id, it.job.inputHash) },
+                tasks = tasks.map { ExchangeManifestTask(it.job.id, it.job.inputHash, it.job.inputRevision) },
                 createdAtMs = createdAt,
             )
             writeManifestAtomically(manifestDirectory, manifest)
@@ -107,10 +117,18 @@ class TelegramExchangeManager(
 
     suspend fun importResponse(uri: Uri): TelegramImportSummary = withContext(Dispatchers.IO) {
         val raw = readBoundedResponse(uri)
-        val response = TelegramExchangeProtocol.parseResponse(raw)
-        val manifest = readManifest(response.requestId)
-        val orderedResults = manifest.orderedResults(response)
+        val responses = TelegramExchangeProtocol.parseResponseFile(raw)
+        // Resolve every manifest and decode every result before opening the all-or-nothing write.
+        val manifests = responses.associate { it.requestId to readManifest(it.requestId) }
+        val orderedResults = responses.flatMap { response -> manifests.getValue(response.requestId).orderedResults(response) }
+        // Zero explicitly means unknown for legacy files, not export/download/analysis time.
+        // Unknown timestamps cannot establish same-input replacement order.
+        val creationTimes = responses.flatMap { response ->
+            response.results.map { it.jobId to (it.analysisCreatedAtMs ?: 0L) }
+        }.toMap()
         val decoded = orderedResults.associate { result -> result.jobId to AiResponseParser.parseStrict(result.responseJson) }
+        val exportedTasks = manifests.values.flatMap { it.tasks }.associateBy { it.jobId }
+        val exportedAt = manifests.values.flatMap { m -> m.tasks.map { it.jobId to m.createdAtMs } }.toMap()
 
         var imported = 0
         var alreadyImported = 0
@@ -118,6 +136,11 @@ class TelegramExchangeManager(
             val jobsById = orderedResults.associate { result ->
                 val job = dao.aiJob(result.jobId) ?: throw IllegalArgumentException("Задание ${result.jobId} уже удалено из TrailSense")
                 require(job.inputHash == result.inputHash) { "Ответ не относится к текущей версии задания ${job.id}" }
+                val exportedRevision = exportedTasks.getValue(job.id).inputRevision
+                require(exportedRevision == null || job.inputRevision == exportedRevision) { "Ответ относится к старой версии задания ${job.id}" }
+                if (exportedRevision == null && job.status == "PENDING") {
+                    require(job.updatedAt <= exportedAt.getValue(job.id)) { "Данные задания изменились после экспорта — отправь очередь заново" }
+                }
                 when (job.status) {
                     "DONE" -> Unit
                     "PENDING" -> { AiJobFreshness.requireInputUnchanged(job); AiJobFreshness.requireCurrent(dao, preferences, job) }
@@ -127,15 +150,23 @@ class TelegramExchangeManager(
             }
             orderedResults.forEach { result ->
                 val job = jobsById.getValue(result.jobId)
-                if (job.status == "DONE") {
+                val createdAt = creationTimes.getValue(job.id)
+                val existing = dao.analysisResult(AnalysisResultFreshness.key(job))
+                if ((job.status == "DONE" && (result.analysisCreatedAtMs == null || exportedTasks.getValue(job.id).inputRevision == null)) ||
+                    !AnalysisResultFreshness.isNewer(job, createdAt, existing)) {
                     alreadyImported++
                     return@forEach
                 }
-                check(dao.claimPendingAiJob(job.id, job.inputHash, IMPORTING_STATUS, System.currentTimeMillis()) == 1) {
-                    "Состояние задания ${job.id} изменилось во время импорта"
+                AiJobFreshness.requireInputUnchanged(job)
+                AiJobFreshness.requireCurrent(dao, preferences, job)
+                if (job.status == "PENDING") {
+                    check(dao.claimPendingAiJob(job.id, job.inputHash, IMPORTING_STATUS, System.currentTimeMillis(), job.inputRevision) == 1) {
+                        "Состояние задания ${job.id} изменилось во время импорта"
+                    }
                 }
                 val parsed = decoded.getValue(job.id)
                 when (job.entityType) {
+                    ComparisonAnalysis.TYPE -> Unit // Store result only; never apply comparison facts to recordings.
                     "ROUTE" -> {
                         val route = dao.route(job.entityId) ?: throw IllegalArgumentException("Маршрут для задания ${job.id} удалён")
                         dao.updateRoute(AiResultMerger.mergeRoute(route, parsed))
@@ -157,13 +188,18 @@ class TelegramExchangeManager(
                         response = parsed.summary,
                         promptTokens = result.promptTokens,
                         completionTokens = result.completionTokens,
+                        createdAt = createdAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
                     )
                 )
-                check(dao.finishClaimedAiJob(job.id, job.inputHash, IMPORTING_STATUS, System.currentTimeMillis()) == 1) {
-                    "Не удалось завершить задание ${job.id}"
+                AnalysisResultFreshness.store(dao, job, createdAt, result.responseJson, preferences)
+                if (job.status == "PENDING") {
+                    check(dao.finishClaimedAiJob(job.id, job.inputHash, IMPORTING_STATUS, System.currentTimeMillis(), job.inputRevision) == 1) {
+                        "Не удалось завершить задание ${job.id}"
+                    }
                 }
                 imported++
             }
+            PendingAnalysisRefresh(dao, preferences).refresh()
         }
         val workManager = WorkManager.getInstance(context)
         orderedResults.forEach { workManager.cancelUniqueWork(AiAnalysisManager.workName(it.jobId)) }

@@ -21,10 +21,14 @@ class OsmTrailClient(private val context: android.content.Context? = null) {
         }
     }
     private val http = OkHttpClient.Builder().connectTimeout(15,TimeUnit.SECONDS).readTimeout(35,TimeUnit.SECONDS).build()
-    suspend fun fetch(area: Area): TrailGraph = withContext(Dispatchers.IO) {
+    data class FetchResult(val graph: TrailGraph, val provider: String, val cacheAgeMs: Long?)
+    suspend fun fetch(area: Area): TrailGraph = fetchResult(area).graph
+    suspend fun fetchResult(area: Area): FetchResult = withContext(Dispatchers.IO) {
         val cache = context?.let { ctx -> java.io.File(java.io.File(ctx.cacheDir,"osm-trails").apply { mkdirs() }, "${area.south}_${area.west}_${area.north}_${area.east}.json") }
         if(cache?.isFile == true && System.currentTimeMillis()-cache.lastModified() in 0..86_400_000L && cache.length() <= 12_000_000) {
-            runCatching { TrailGraph.parse(cache.readText()) }.getOrNull()?.let { return@withContext it }
+            runCatching { TrailGraph.parse(cache.readText()) }.getOrNull()?.let {
+                return@withContext FetchResult(it,"OSM/Overpass · локальный кэш",System.currentTimeMillis()-cache.lastModified())
+            }
         }
         var lastError: Exception? = null
         for (endpoint in listOf("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")) {
@@ -49,7 +53,7 @@ class OsmTrailClient(private val context: android.content.Context? = null) {
                     }
                     parsed
                 }
-                return@withContext graph
+                return@withContext FetchResult(graph,endpoint,null)
             } catch(e: kotlinx.coroutines.CancellationException) { throw e }
             catch(e: Exception) { lastError=e }
         }

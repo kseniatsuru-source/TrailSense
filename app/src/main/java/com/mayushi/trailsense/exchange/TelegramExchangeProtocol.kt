@@ -23,6 +23,7 @@ data class ExchangeResponseResult(
     val responseJson: String,
     val promptTokens: Int,
     val completionTokens: Int,
+    val analysisCreatedAtMs: Long? = null,
 )
 
 data class ExchangeResponse(
@@ -33,6 +34,7 @@ data class ExchangeResponse(
 data class ExchangeManifestTask(
     val jobId: Long,
     val inputHash: String,
+    val inputRevision: Long? = null,
 )
 
 data class ExchangeManifest(
@@ -61,7 +63,9 @@ data class ExchangeManifest(
 
     fun toJson(): String {
         val taskArray = JSONArray()
-        tasks.forEach { task -> taskArray.put(JSONObject().put("job_id", task.jobId).put("input_hash", task.inputHash)) }
+        tasks.forEach { task -> taskArray.put(JSONObject().put("job_id", task.jobId).put("input_hash", task.inputHash).apply {
+            task.inputRevision?.let { put("input_revision", it) }
+        }) }
         return JSONObject()
             .put("protocol", TelegramExchangeProtocol.PROTOCOL)
             .put("schema_version", TelegramExchangeProtocol.SCHEMA_VERSION)
@@ -87,7 +91,9 @@ data class ExchangeManifest(
                     val jobId = exactJsonLong(item, "job_id") ?: -1
                     val hash = item.optString("input_hash")
                     require(jobId > 0 && seen.add(jobId) && hash.matches(TelegramExchangeProtocol.HASH_REGEX)) { "Повреждён внутренний манифест запроса" }
-                    add(ExchangeManifestTask(jobId, hash))
+                    val revision = if (item.has("input_revision")) exactJsonLong(item, "input_revision") else null
+                    require(!item.has("input_revision") || (revision != null && revision > 0)) { "Повреждена версия данных задания" }
+                    add(ExchangeManifestTask(jobId, hash, revision))
                 }
             }
             return ExchangeManifest(requestId, tasks, exactJsonLong(json, "created_at_ms") ?: 0)
@@ -156,6 +162,7 @@ object TelegramExchangeProtocol {
                     .put("job_id", "copy exactly from task")
                     .put("input_hash", "copy exactly from task")
                     .put("status", "ok")
+                    .put("analysis_created_at_ms", "positive Unix milliseconds when this analysis was created, not downloaded; required for replacing a completed result")
                     .put("response", JSONObject().put("summary", "analysis text").put("route_facts", JSONObject.NULL).put("activity_facts", JSONObject.NULL))
                     .put("prompt_tokens", 0)
                     .put("completion_tokens", 0),
@@ -171,6 +178,31 @@ object TelegramExchangeProtocol {
             .put("privacy", "Contains only the compact data explicitly queued in TrailSense and an optional user-selected screenshot. It contains no API key or raw GPS track.")
             .put("analysis_instructions", instructions)
             .put("response_contract", responseContract)
+    }
+
+    /** Version 2 wraps complete version-1 responses; it never changes a task identity/hash. */
+    fun parseResponseFile(raw: String): List<ExchangeResponse> {
+        val json = try { JSONObject(raw) } catch (_: Exception) {
+            throw IllegalArgumentException("Повреждённый файл ответа TrailSense")
+        }
+        require(json.optString("protocol") == PROTOCOL) { "Это не файл ответа TrailSense" }
+        val version = exactJsonInt(json, "schema_version")
+        if (version == SCHEMA_VERSION) return listOf(parseResponse(raw))
+        require(version == 2) { "Версия файла ответа не поддерживается" }
+        require(json.optString("direction") == "analysis_response_batch") { "Ожидался пакет ответов Mayushi" }
+        require(!json.has("results") && !json.has("request_id")) { "Неоднозначный формат пакета ответов" }
+        val array = json.optJSONArray("responses") ?: throw IllegalArgumentException("В пакете нет ответов")
+        require(array.length() > 0) { "В пакете нет ответов" }
+        val requests = mutableSetOf<String>()
+        val jobs = mutableSetOf<Long>()
+        return (0 until array.length()).map { index ->
+            val item = array.optJSONObject(index) ?: throw IllegalArgumentException("Повреждён ответ ${index + 1}")
+            val response = parseResponse(item.toString())
+            require(requests.add(response.requestId)) { "Пакет содержит повторяющиеся запросы" }
+            // The same job may have been exported in several requests. Never choose a winner silently.
+            require(response.results.all { jobs.add(it.jobId) }) { "Пакет содержит повторяющиеся задания из разных запросов" }
+            response
+        }
     }
 
     fun parseResponse(raw: String): ExchangeResponse {
@@ -197,7 +229,12 @@ object TelegramExchangeProtocol {
                 require(response.optString("summary").isNotBlank()) { "В ответе Mayushi нет текста анализа" }
                 val promptTokens = tokenCount(item, "prompt_tokens")
                 val completionTokens = tokenCount(item, "completion_tokens")
-                add(ExchangeResponseResult(jobId, inputHash, response.toString(), promptTokens, completionTokens))
+                val createdAt = if (item.has("analysis_created_at_ms")) {
+                    val timestamp = exactJsonLong(item, "analysis_created_at_ms")
+                    require(timestamp != null && timestamp > 0) { "Некорректное время создания анализа" }
+                    timestamp
+                } else null
+                add(ExchangeResponseResult(jobId, inputHash, response.toString(), promptTokens, completionTokens, createdAt))
             }
         }
         return ExchangeResponse(requestId, results)

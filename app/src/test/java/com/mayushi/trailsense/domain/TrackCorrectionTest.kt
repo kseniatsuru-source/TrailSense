@@ -6,22 +6,17 @@ import org.junit.Test
 
 class TrackCorrectionTest {
     @Test fun `missing beginning of out and back is reconstructed from recorded return`() {
-        val points = listOf(
-            point(1, 1_000),
-            point(2, 2_000),
-            point(3, 3_000),
-            point(2, 4_000),
-            point(1, 5_000),
-            point(0, 6_000),
-        )
+        val points = ((20..100).toList() + (99 downTo 0).toList()).mapIndexed { i,x ->
+            TrackPoint(49.0 + x*.0001, -123.0, elevationM=x.toDouble(),timeEpochMs=i*1000L)
+        }
 
         val corrected = TrackCorrection.inferMissingOutAndBackStart(points, maxJoinDistanceM = 5.0)
 
-        assertEquals(8, corrected.size)
+        assertEquals(points.size+21, corrected.size)
         assertEquals(-123.0, corrected.first().longitude, 0.000001)
         assertEquals(null, corrected.first().timeEpochMs)
         assertEquals(null, corrected[1].timeEpochMs)
-        assertEquals(points, corrected.drop(2))
+        assertEquals(points, corrected.drop(21))
         assertEquals(-123.0, corrected.last().longitude, 0.000001)
         assertTrue(TrackAnalyzer.analyze(corrected).distanceM > TrackAnalyzer.analyze(points).distanceM)
     }

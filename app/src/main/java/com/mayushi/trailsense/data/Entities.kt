@@ -50,6 +50,7 @@ data class ActivityEntity(
     val importedStartedAt: Long? = null,
     val manualDateEpochDay: Long? = null,
     val originalMetricsJson: String? = null,
+    @ColumnInfo(defaultValue = "''") val huaweiFactsJson: String = "",
     @ColumnInfo(defaultValue = "''") val customRatings: String = "",
     @ColumnInfo(defaultValue = "''") val pointsOfInterest: String = "",
     val distanceM: Double,
@@ -68,6 +69,9 @@ data class ActivityEntity(
     val technicality: Int? = null,
     val enjoyment: Int? = null,
     val sleepHours: Double? = null,
+    val sleepOcrMinutes: Int? = null,
+    val sleepOcrStatus: String? = null,
+    @ColumnInfo(defaultValue = "''") val questionnaireHistory: String = "",
     val sleepQuality: Int? = null,
     val feltRested: Boolean? = null,
     val anomaly: String = "NORMAL",
@@ -89,6 +93,16 @@ data class CompanionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val notes: String = "",
+    @ColumnInfo(defaultValue = "0") val deleted: Boolean = false,
+)
+
+/** Small scalar index; full private source JSON lives in bounded immutable chunks. */
+@Entity(tableName = "huawei_sources", primaryKeys = ["kind", "sourceId"])
+data class HuaweiSourceEntity(
+    val kind: String, val sourceId: String, val sourceHash: String,
+    val activityId: Long?, val payloadRef: String,
+    val deviceId: String, val sourceOffset: String, val startTimeMs: Long, val endTimeMs: Long,
+    val wakeEpochDay: Long?, val durationMs: Long?, val nap: Boolean,
 )
 
 @Entity(
@@ -121,6 +135,7 @@ data class PaceSegmentEntity(
 @Entity(tableName = "calendar_context", indices = [Index("startEpochDay"), Index("endEpochDay")])
 data class CalendarContextEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(defaultValue = "0") val ongoing: Boolean = false,
     val startEpochDay: Long,
     val endEpochDay: Long,
     val type: String,
@@ -138,6 +153,21 @@ data class PillPlanEntity(
     val breakDays: Int = 7,
     val enabled: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val subBlockDays: Int = 0,
+    @ColumnInfo(defaultValue = "0") val subBlockCount: Int = 0,
+)
+
+@Entity(tableName = "pill_plan_versions", indices = [Index("effectiveEpochDay")])
+data class PillPlanVersionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val effectiveEpochDay: Long,
+    val anchorEpochDay: Long,
+    val activeDays: Int,
+    val breakDays: Int,
+    val enabled: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0") val subBlockDays: Int = 0,
+    @ColumnInfo(defaultValue = "0") val subBlockCount: Int = 0,
 )
 
 @Entity(tableName = "pill_events", indices = [Index("epochDay")])
@@ -181,4 +211,21 @@ data class AiJobEntity(
     val lastError: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "''") val scopeKey: String = "",
+    @ColumnInfo(defaultValue = "1") val inputRevision: Long = 1,
+)
+
+/** Durable latest result per exact object/recording set; independent of disposable caches. */
+@Entity(tableName = "analysis_results")
+data class AnalysisResultEntity(
+    @PrimaryKey val resultKey: String,
+    val entityType: String,
+    val entityId: Long,
+    val analysisKind: String,
+    val scopeKey: String,
+    val jobId: Long,
+    val inputHash: String,
+    val inputRevision: Long,
+    val analysisCreatedAtMs: Long,
+    val responseJson: String,
 )

@@ -12,7 +12,7 @@ The project's main goal is to use that history to predict how long a future hike
 
 The example is my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
 
-The demo uses development build **0.4.1**. This repository's source is currently an earlier **0.3.6 snapshot** and does not yet include all demonstrated features.
+This repository contains the **0.4.1** Russian-language application. The demo was recorded from an isolated English version of the same development build.
 
 ### Animated preview
 

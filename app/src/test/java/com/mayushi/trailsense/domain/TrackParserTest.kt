@@ -8,6 +8,14 @@ import javax.xml.parsers.SAXParserFactory
 import java.time.Instant
 
 class TrackParserTest {
+    @Test fun `cadence explicit measured only never leaks to following point`() {
+        val xml="<gpx><trk><trkseg><trkpt lat=\"49\" lon=\"-123\"><extensions><cad>82</cad><hr>130</hr></extensions></trkpt><trkpt lat=\"49.001\" lon=\"-123\" /></trkseg></trk></gpx>"
+        val parsed=TrackParser.parse(xml.byteInputStream(),"synthetic.gpx")
+        assertEquals(82,parsed.points.first().cadencePerMinute)
+        assertEquals(130,parsed.points.first().heartRateBpm)
+        assertNull(parsed.points.last().cadencePerMinute)
+        assertNull(parsed.points.last().heartRateBpm)
+    }
     @Test fun `tcx recorded point time wins over inconsistent export headers`() {
         val xml = """<?xml version="1.0"?><TrainingCenterDatabase><Activities><Activity>
           <Id>2026-06-02T18:03:20.000Z</Id><Lap StartTime="2026-06-02T18:04:00.000Z"><Track>

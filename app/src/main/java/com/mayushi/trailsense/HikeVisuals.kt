@@ -87,7 +87,7 @@ fun TopographicTrackMap(
         TrackGeometry.split(points).filter { it.size >= 2 }.sortedBy { it.first().inferred }.forEach { segment ->
             map.overlays += Polyline().apply {
                 setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                outlinePaint.color = if (highlightedRange != null) AndroidColor.rgb(110,120,130) else if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(190,45,220)
+                outlinePaint.color = if (highlightedRange != null) AndroidColor.rgb(110,120,130) else if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(204,40,107)
                 outlinePaint.strokeWidth = if (segment.first().inferred) 15f else 8f
                 if (segment.first().inferred) outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f,12f),0f)
             }
@@ -99,7 +99,7 @@ fun TopographicTrackMap(
             TrackGeometry.split(points.subList(start,end+1)).filter { it.size >= 2 }.sortedBy { it.first().inferred }.forEach { segment ->
                 map.overlays += Polyline().apply {
                     setPoints(segment.map { GeoPoint(it.latitude, it.longitude) })
-                    outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(190,45,220)
+                    outlinePaint.color = if (segment.first().inferred) AndroidColor.rgb(30,230,115) else AndroidColor.rgb(204,40,107)
                     outlinePaint.strokeWidth = if (segment.first().inferred) 18f else 12f
                     if (segment.first().inferred) outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(24f,12f),0f)
                 }
@@ -173,11 +173,15 @@ fun ElevationProfile(points: List<TrackPoint>, modifier: Modifier = Modifier, di
                 val a=position(index-1); val b=position(index)
                 target.moveTo(a.x,a.y); target.lineTo(b.x,b.y)
             }
-            drawPath(path, color = androidx.compose.ui.graphics.Color(0xFFBE2DDC), style = Stroke(width = 4f))
+            drawPath(path, color = androidx.compose.ui.graphics.Color(0xFFCC286B), style = Stroke(width = 4f))
             drawPath(inferredPath, color = androidx.compose.ui.graphics.Color(0xFF29BE68), style = Stroke(width = 4f))
             drawLine(axisColor, Offset(0f, size.height), Offset(size.width, size.height), 1f)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("0 км"); Text("%.2f км".format(cumulative.last()/1000.0)) }
+        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("● Запись",color=androidx.compose.ui.graphics.Color(0xFFCC286B),style=MaterialTheme.typography.labelSmall)
+            if(points.any {it.inferred}) Text("● Оценка",color=androidx.compose.ui.graphics.Color(0xFF29BE68),style=MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
@@ -190,8 +194,8 @@ fun RichAnalysisText(text: String) {
             val raw = lines[index].trim()
             when {
                 raw.isBlank() -> Unit
-                raw.startsWith("## ") -> Text(raw.removePrefix("## "), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                raw.startsWith("# ") -> Text(raw.removePrefix("# "), style = MaterialTheme.typography.titleLarge)
+                raw.startsWith("## ") -> Text(raw.removePrefix("## "), style = MaterialTheme.typography.titleMedium, color = androidx.compose.ui.graphics.Color(0xFFA4D9C0))
+                raw.startsWith("# ") -> Text(raw.removePrefix("# "), style = MaterialTheme.typography.titleLarge, color = androidx.compose.ui.graphics.Color(0xFFA4D9C0))
                 raw.startsWith("- ") || raw.startsWith("• ") -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("•", color = MaterialTheme.colorScheme.secondary)
                     Text(raw.drop(2), Modifier.weight(1f))

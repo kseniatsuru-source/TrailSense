@@ -2,7 +2,15 @@ package com.mayushi.trailsense.domain
 
 import java.time.LocalDate
 
-data class PillPlan(val anchorEpochDay: Long, val activeDays: Int = 84, val breakDays: Int = 7) {
+data class PillPlan(
+    val anchorEpochDay: Long, val activeDays: Int = 84, val breakDays: Int = 7,
+    val subBlockDays: Int = if (activeDays == 84) 21 else activeDays,
+    val subBlockCount: Int = if (activeDays == 84) 4 else 1,
+) {
+    init {
+        require(activeDays > 0 && breakDays >= 0 && activeDays.toLong() + breakDays <= Int.MAX_VALUE)
+        require(subBlockDays > 0 && subBlockCount > 0 && subBlockDays.toLong() * subBlockCount == activeDays.toLong())
+    }
     val blockDays: Int get() = activeDays + breakDays
 }
 
@@ -16,6 +24,9 @@ data class PillDay(
     val dayInPhase: Int,
     val dayInBlock: Int,
     val blockNumber: Long,
+    val dayInSubBlock: Int = 0,
+    val subBlockIndex: Int = 0,
+    val subBlockCount: Int = 1,
 )
 
 data class PillBoundaryOverride(val plannedEpochDay: Long, val actualEpochDay: Long)
@@ -23,14 +34,15 @@ data class PillScheduleChange(val plan: PillPlan, val nearestBoundaryOverride: P
 
 object PillSchedule {
     fun day(plan: PillPlan, date: LocalDate): PillDay {
-        require(plan.activeDays > 0 && plan.breakDays > 0)
+        require(plan.activeDays > 0 && plan.breakDays >= 0 && plan.activeDays.toLong()+plan.breakDays <= Int.MAX_VALUE)
         val relative = date.toEpochDay() - plan.anchorEpochDay
         val index = Math.floorMod(relative, plan.blockDays.toLong()).toInt()
         val block = Math.floorDiv(relative, plan.blockDays.toLong())
         return if (index < plan.activeDays) {
-            PillDay(date, PillPhase.ACTIVE, index + 1, index + 1, block)
+            PillDay(date, PillPhase.ACTIVE, index + 1, index + 1, block,
+                index % plan.subBlockDays + 1, index / plan.subBlockDays + 1, plan.subBlockCount)
         } else {
-            PillDay(date, PillPhase.BREAK, index - plan.activeDays + 1, index + 1, block)
+            PillDay(date, PillPhase.BREAK, index - plan.activeDays + 1, index + 1, block, 0, 0, plan.subBlockCount)
         }
     }
 

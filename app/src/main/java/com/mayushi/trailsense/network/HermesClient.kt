@@ -43,7 +43,7 @@ class HermesClient(private val client: OkHttpClient = defaultClient()) {
             .header("Authorization", "Bearer $bearerKey")
             .header("X-Hermes-Session-Id", sessionId.take(128))
             .header("X-Hermes-Session-Key", "app:trailsense:mayushi")
-            .header("Idempotency-Key", UUID.nameUUIDFromBytes((sessionId + payload).toByteArray()).toString())
+            .header("Idempotency-Key", UUID.nameUUIDFromBytes((sessionId + "\u0000" + body.toString()).toByteArray(Charsets.UTF_8)).toString())
             .post(body.toString().toRequestBody(JSON)).build()
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()

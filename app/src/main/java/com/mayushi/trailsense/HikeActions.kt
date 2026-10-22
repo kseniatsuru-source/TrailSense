@@ -14,13 +14,13 @@ fun displayedRecordedDistance(activity: ActivityEntity, points: List<com.mayushi
 }
 
 @Composable
-fun HikeAnalysisChoice(id: Long, vm: AppViewModel, dismiss: () -> Unit) {
+fun HikeAnalysisChoice(activityId: Long, vm: AppViewModel, dismiss: () -> Unit) {
     val context = LocalContext.current
     AlertDialog(onDismissRequest = dismiss, title = { Text("Персональный анализ") }, text = {
         Column {
-            Text("Только текущий хайк. Отправка откроет системный выбор приложения; можно отменить.")
-            TextButton(onClick = { vm.requestRouteAnalysis(id, "DEEP_ROUTE", allowDirect = false); dismiss() }) { Text("Добавить в очередь") }
-            TextButton(onClick = { vm.sendCurrentHike(context, id); dismiss() }) { Text("Отправить сейчас") }
+            InfoHint("Персональный анализ", "Только текущий хайк. Отправка откроет системный выбор приложения; можно отменить.")
+            TextButton(onClick = { vm.requestRecordingAnalysis(activityId); dismiss() }) { Text("Поставить в очередь") }
+            TextButton(onClick = { vm.sendCurrentHike(context, activityId); dismiss() }) { Text("Отправить сейчас") }
         }
     }, confirmButton = { TextButton(onClick = dismiss) { Text("Отмена") } })
 }

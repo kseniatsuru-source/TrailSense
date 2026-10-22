@@ -9,6 +9,8 @@ data class TrackPoint(
     val segmentStart: Boolean = false,
     val inferred: Boolean = false,
     val watchDistanceM: Double? = null,
+    /** As reported: no doubling of cycling cadence or invented step cadence. */
+    val cadencePerMinute: Int? = null,
 )
 
 data class TrackSegment(

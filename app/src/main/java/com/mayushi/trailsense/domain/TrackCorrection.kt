@@ -23,23 +23,15 @@ object TrackCorrection {
         require(points.maxOf { Geo.distanceM(first, it) } >= 500.0) {
             "Трек слишком короткий, чтобы надёжно восстановить пропущенное начало"
         }
-        val searchStart = (points.size / 2).coerceAtMost(points.lastIndex - 2)
-        val joinIndex = manualJoinIndex?.also { require(it in searchStart until points.lastIndex) { "Выбери точку на обратном участке" } } ?: (searchStart until points.lastIndex)
-            .minByOrNull { Geo.distanceM(first, points[it]) }
-            ?: throw IllegalArgumentException("Не удалось найти обратный участок возле точки старта записи")
+        val joinIndex = manualJoinIndex?.also { require(it in 1 until points.lastIndex) { "Выбери точку на обратном участке" } }
+            ?: MissingStartRecovery.returnMatch(points).joinIndex
         val joinDistance = Geo.distanceM(first, points[joinIndex])
         require(joinDistance <= maxJoinDistanceM) {
             "Точка возврата дальше 150 м от начала записи. Передвинь её ближе или выбери настоящий пропущенный старт на карте."
         }
         require(joinIndex < points.lastIndex) { "После точки возврата нет участка для восстановления" }
 
-        val recordedStart = first.timeEpochMs
-        val joinTime = points[joinIndex].timeEpochMs
-        val endTime = points.last().timeEpochMs
         val mirrored = points.subList(joinIndex, points.size).asReversed().map { source ->
-            val inferredTime = if (recordedStart != null && joinTime != null && endTime != null && source.timeEpochMs != null) {
-                recordedStart - (source.timeEpochMs - joinTime)
-            } else null
             source.copy(timeEpochMs = null, heartRateBpm = null, inferred = true, segmentStart = false, watchDistanceM = null)
         }
         return mirrored + points

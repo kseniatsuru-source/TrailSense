@@ -118,6 +118,7 @@ object TrackParser {
         private var currentTime: Long? = null
         private var currentHr: Int? = null
         private var currentDistance: Double? = null
+        private var currentCadence: Int? = null
         private var inTrackName = false
         private var summaryDistanceM: Double? = null
         private var summaryElevationGainM: Double? = null
@@ -199,18 +200,20 @@ object TrackParser {
                     currentTime = parseTime(value)
                     // Date is accepted only when the GPS point below is accepted.
                 }
-                "value", "hr" -> if (currentHr == null) currentHr = value.toIntOrNull()
+                "value" -> if(parentTag == "heartratebpm" && currentHr == null) currentHr = value.toIntOrNull()
+                "hr" -> currentHr = value.toIntOrNull()
+                "cadence", "cad", "runcadence" -> currentCadence = value.toIntOrNull()?.takeIf {it in 1..400}
             }
             if (tag == "name" && inTrackName && value.isNotBlank()) { name = value; inTrackName = false }
             if (tag in setOf("trkpt", "rtept", "trackpoint")) {
                 val lat = currentLat; val lon = currentLon
                 if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
                     if (firstPointTime == null) firstPointTime = currentTime
-                    points += TrackPoint(lat, lon, currentEle, currentTime, currentHr, segmentStart = nextSegmentStart, watchDistanceM = currentDistance)
+                    points += TrackPoint(lat, lon, currentEle, currentTime, currentHr, segmentStart = nextSegmentStart, watchDistanceM = currentDistance, cadencePerMinute = currentCadence)
                     nextSegmentStart = false
                 }
                 inPoint = false; currentLat = null; currentLon = null; currentEle = null; currentTime = null; currentHr = null
-                currentDistance = null
+                currentDistance = null; currentCadence = null
             }
             if (elementStack.lastOrNull() == tag) elementStack.removeLast()
             text = StringBuilder()

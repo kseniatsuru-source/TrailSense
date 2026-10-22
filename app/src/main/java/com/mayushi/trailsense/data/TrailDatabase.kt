@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [TrackChunkEntity::class, RouteEntity::class, ActivityEntity::class, CompanionEntity::class, ActivityCompanionCrossRef::class, PaceSegmentEntity::class, CalendarContextEntity::class, PillPlanEntity::class, PillEventEntity::class, AiCacheEntity::class, AiJobEntity::class],
-    version = 8,
+    entities = [HuaweiSourceEntity::class, TrackChunkEntity::class, RouteEntity::class, ActivityEntity::class, CompanionEntity::class, ActivityCompanionCrossRef::class, PaceSegmentEntity::class, CalendarContextEntity::class, PillPlanEntity::class, PillPlanVersionEntity::class, PillEventEntity::class, AiCacheEntity::class, AiJobEntity::class, AnalysisResultEntity::class],
+    version = 12,
     exportSchema = false,
 )
 abstract class TrailDatabase : RoomDatabase() {
@@ -19,8 +19,49 @@ abstract class TrailDatabase : RoomDatabase() {
         @Volatile private var instance: TrailDatabase? = null
         fun get(context: Context): TrailDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, TrailDatabase::class.java, "trailsense.db")
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_6, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_6, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build().also { instance = it }
+        }
+
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE activities ADD COLUMN huaweiFactsJson TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE companions ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS huawei_sources (kind TEXT NOT NULL, sourceId TEXT NOT NULL, sourceHash TEXT NOT NULL, activityId INTEGER, payloadRef TEXT NOT NULL, deviceId TEXT NOT NULL, sourceOffset TEXT NOT NULL, startTimeMs INTEGER NOT NULL, endTimeMs INTEGER NOT NULL, wakeEpochDay INTEGER, durationMs INTEGER, nap INTEGER NOT NULL, PRIMARY KEY(kind,sourceId))")
+            }
+        }
+
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE ai_jobs ADD COLUMN scopeKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE ai_jobs ADD COLUMN inputRevision INTEGER NOT NULL DEFAULT 1")
+                // Order old jobs locally; never reinterpret existing payload bytes or hashes.
+                db.execSQL("UPDATE ai_jobs SET inputRevision=id")
+                db.execSQL("CREATE TABLE IF NOT EXISTS analysis_results (resultKey TEXT NOT NULL PRIMARY KEY, entityType TEXT NOT NULL, entityId INTEGER NOT NULL, analysisKind TEXT NOT NULL, scopeKey TEXT NOT NULL, jobId INTEGER NOT NULL, inputHash TEXT NOT NULL, inputRevision INTEGER NOT NULL, analysisCreatedAtMs INTEGER NOT NULL, responseJson TEXT NOT NULL)")
+            }
+        }
+
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Zero means derive the legacy subdivision without changing old fields.
+                for (table in listOf("pill_plans", "pill_plan_versions")) {
+                    db.execSQL("ALTER TABLE $table ADD COLUMN subBlockDays INTEGER NOT NULL DEFAULT 0")
+                    db.execSQL("ALTER TABLE $table ADD COLUMN subBlockCount INTEGER NOT NULL DEFAULT 0")
+                }
+            }
+        }
+
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE activities ADD COLUMN sleepOcrMinutes INTEGER")
+                db.execSQL("ALTER TABLE activities ADD COLUMN sleepOcrStatus TEXT")
+                db.execSQL("ALTER TABLE activities ADD COLUMN questionnaireHistory TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE calendar_context ADD COLUMN ongoing INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS pill_plan_versions (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, effectiveEpochDay INTEGER NOT NULL, anchorEpochDay INTEGER NOT NULL, activeDays INTEGER NOT NULL, breakDays INTEGER NOT NULL, enabled INTEGER NOT NULL, createdAt INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pill_plan_versions_effectiveEpochDay ON pill_plan_versions(effectiveEpochDay)")
+                // Copy the known old regimen; no past cycle rewritten by later starts.
+                db.execSQL("INSERT INTO pill_plan_versions(effectiveEpochDay,anchorEpochDay,activeDays,breakDays,enabled,createdAt) SELECT anchorEpochDay,anchorEpochDay,activeDays,breakDays,enabled,updatedAt FROM pill_plans WHERE id=1")
+            }
         }
 
         val MIGRATION_7_8 = object : Migration(7, 8) {

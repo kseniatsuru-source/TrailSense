@@ -10,11 +10,12 @@ data class CalendarDayCell(
 )
 
 object CalendarMonthGrid {
-    /** Six complete Monday-first weeks keep the visual calendar stable between months. */
+    /** Only complete Monday-first weeks needed for this month. */
     fun cells(month: YearMonth): List<CalendarDayCell> {
         val first = month.atDay(1)
         val gridStart = first.minusDays((first.dayOfWeek.value - 1).toLong())
-        return (0L until 42L).map { offset ->
+        val days = ((first.dayOfWeek.value - 1 + month.lengthOfMonth() + 6) / 7) * 7L
+        return (0L until days).map { offset ->
             val date = gridStart.plusDays(offset)
             CalendarDayCell(date, YearMonth.from(date) == month)
         }

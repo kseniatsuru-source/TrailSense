@@ -140,6 +140,50 @@ class TelegramExchangeProtocolTest {
         assertFailsWithMessage("В ответе Mayushi нет текста анализа") { TelegramExchangeProtocol.parseResponse(missingSummary) }
     }
 
+    @Test fun `single file accepts legacy or multiple complete requests without rebinding`() {
+        val first = responseJson("one", 17)
+        val second = responseJson("two", 18)
+        assertEquals(listOf("one"), TelegramExchangeProtocol.parseResponseFile(first.toString()).map { it.requestId })
+        val batch = batchJson(first, second)
+        val parsed = TelegramExchangeProtocol.parseResponseFile(batch.toString())
+        assertEquals(listOf("one", "two"), parsed.map { it.requestId })
+        assertEquals(listOf(17L, 18L), parsed.flatMap { it.results }.map { it.jobId })
+        assertTrue(parsed.flatMap { it.results }.all { it.inputHash == "a".repeat(64) })
+        assertEquals(1, TelegramExchangeProtocol.parseResponseFile(batchJson(first).toString()).size)
+    }
+
+    @Test fun `batch rejects conflicts duplicates foreign data and invalid nested response`() {
+        val first = responseJson("one", 17)
+        assertFailsWithMessage("Пакет содержит повторяющиеся запросы") {
+            TelegramExchangeProtocol.parseResponseFile(batchJson(first, responseJson("one", 18)).toString())
+        }
+        assertFailsWithMessage("Пакет содержит повторяющиеся задания из разных запросов") {
+            TelegramExchangeProtocol.parseResponseFile(batchJson(first, responseJson("two", 17)).toString())
+        }
+        assertFailsWithMessage("В пакете нет ответов") { TelegramExchangeProtocol.parseResponseFile(batchJson().toString()) }
+        assertFailsWithMessage("Это не файл ответа TrailSense") {
+            TelegramExchangeProtocol.parseResponseFile(batchJson(first).put("protocol", "huawei-data").toString())
+        }
+        assertFailsWithMessage("Версия файла ответа не поддерживается") {
+            TelegramExchangeProtocol.parseResponseFile(batchJson(first).put("schema_version", 2.1).toString())
+        }
+        assertFailsWithMessage("В ответе Mayushi нет текста анализа") {
+            val invalid = responseJson("two", 18)
+            invalid.getJSONArray("results").getJSONObject(0).getJSONObject("response").put("summary", "")
+            TelegramExchangeProtocol.parseResponseFile(batchJson(first, invalid).toString())
+        }
+    }
+
+    private fun responseJson(requestId: String, id: Long): JSONObject = JSONObject()
+        .put("protocol", TelegramExchangeProtocol.PROTOCOL).put("schema_version", 1)
+        .put("direction", "analysis_response").put("request_id", requestId)
+        .put("results", org.json.JSONArray().put(JSONObject().put("job_id", id).put("input_hash", "a".repeat(64))
+            .put("status", "ok").put("response", JSONObject().put("summary", "Synthetic analysis"))))
+
+    private fun batchJson(vararg responses: JSONObject): JSONObject = JSONObject()
+        .put("protocol", TelegramExchangeProtocol.PROTOCOL).put("schema_version", 2)
+        .put("direction", "analysis_response_batch").put("responses", org.json.JSONArray(responses.toList()))
+
     private fun assertFailsWithMessage(expected: String, block: () -> Unit) {
         try {
             block()

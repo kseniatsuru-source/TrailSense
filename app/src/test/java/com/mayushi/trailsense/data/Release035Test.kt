@@ -43,7 +43,7 @@ class Release035Test {
         AiJobFreshness.requireCurrent(dao,prefs,job)
         repo.setHeavyBackpack(1,true)
         val enabled=dao.activity(1)!!
-        assertTrue(enabled.heavyBackpack);assertEquals("SUPERSEDED",dao.aiJob(jobId)!!.status)
+        assertTrue(enabled.heavyBackpack);assertEquals("PENDING",dao.aiJob(jobId)!!.status) // Existing jobs refresh in place; no automatic replacement jobs.
         try { AiJobFreshness.requireCurrent(dao,prefs,job);fail("Known old request must be stale") } catch (_:IllegalArgumentException) {}
         val after=payload(enabled);assertTrue(after.getJSONObject("activity").getBoolean("heavy_backpack"))
         assertFalse(after.getJSONObject("activity").getJSONObject("backpack_context").getBoolean("weight_is_measured"))
@@ -60,9 +60,10 @@ class Release035Test {
     }
     @Test fun migration7To8PreservesExactTrackAndContext()=runBlocking {
         val name="upgrade035.db";context.deleteDatabase(name)
-        fun open()=Room.databaseBuilder(context,TrailDatabase::class.java,name).addMigrations(TrailDatabase.MIGRATION_7_8).allowMainThreadQueries().build()
+        fun open()=Room.databaseBuilder(context,TrailDatabase::class.java,name).addMigrations(TrailDatabase.MIGRATION_7_8, TrailDatabase.MIGRATION_8_9, TrailDatabase.MIGRATION_9_10, TrailDatabase.MIGRATION_10_11, TrailDatabase.MIGRATION_11_12).allowMainThreadQueries().build()
         var db=open();db.trailDao().insertRoute(RouteEntity(id=1,title="Synthetic"));db.trailDao().insertActivity(activity());db.close()
         val native=android.database.sqlite.SQLiteDatabase.openDatabase(context.getDatabasePath(name).path,null,android.database.sqlite.SQLiteDatabase.OPEN_READWRITE)
+        native.remove037Schema()
         native.execSQL("PRAGMA foreign_keys=OFF")
         val schema=native.rawQuery("SELECT sql FROM sqlite_master WHERE name='activities'",null).use { it.moveToFirst();it.getString(0) }
         val fields=schema.substringAfter('(').substringBeforeLast(')').split(", ").filterNot { it.startsWith("`heavyBackpack` ") }
