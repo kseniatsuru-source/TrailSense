@@ -10,7 +10,7 @@ The project's main goal is to use that history to predict how long a future hike
 
 ## Demo
 
-The example is my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
+The example is my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4. The video also uses my Marriott Basin Trail recording for track correction and the two-hike map. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
 
 This repository contains the **0.4.1** Russian-language application. The demo was recorded from an isolated English version of the same development build.
 
@@ -20,7 +20,7 @@ This repository contains the **0.4.1** Russian-language application. The demo wa
 
 [Open the full MP4 video](docs/demo/TrailSense_HSCT_Demo_EN.mp4) · [Read the English hike analysis](docs/demo/HSCT_Analysis_EN.md)
 
-The demo covers recording import, the route map and elevation profile, this hike's actual questionnaire with companion details redacted, and importing and viewing a new AI analysis. Waits and transitions shortened. The GIF above is an animated preview; the full video is available through the MP4 link.
+This edited preview shows importing the Howe Sound Crest Trail recording, an AllTrails route search, questionnaire entry, local request export, importing and quickly viewing a previously saved AI analysis, and the context calendar. Marriott Basin Trail is already saved before the import; separate examples show trimming and an estimated missing start, followed by a map with both hikes. Some HSCT scenes were recorded earlier. Nothing is sent to Telegram in this preview, and no new analysis is generated. Idle waits are shortened, analysis viewing is accelerated, and tap highlights are added in editing. The GIF above is an abbreviated animated preview; use the MP4 link for the full video.
 
 ### Screenshots
 
@@ -166,7 +166,7 @@ The release variant currently uses debug signing for checks on a personal device
 
 Recordings and questionnaires are stored locally. Requests sent to Mayushi contain the selected hike data, personal ratings, and context. Review their contents before sharing or publishing them.
 
-This demonstration is limited to my Howe Sound Crest Trail hike. It excludes information about companions and other people, unrelated calendar entries, app databases, keys, and diagnostic reports.
+This demonstration uses my Howe Sound Crest Trail recording, questionnaire and analysis, plus Marriott Basin Trail for track correction and the two-hike map. It excludes information about companions and other people, unrelated calendar entries, app databases, keys, and diagnostic reports.
 
 ## License
 
