@@ -10,7 +10,7 @@ The project's main goal is to use that history to predict how long a future hike
 
 ## Demo
 
-The example is my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4. The video also uses my Marriott Basin Trail recording for track correction and the two-hike map. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
+The examples use my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4, and my Marriott Basin Trail recording for track correction and the two-hike map. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
 
 This repository contains the **0.4.1** Russian-language application. The demo was recorded from an isolated English version of the same development build.
 
@@ -24,22 +24,41 @@ This edited preview shows importing the Howe Sound Crest Trail recording, an All
 
 ### Screenshots
 
+**Hike history and all-hikes map**
+
 <p>
-  <img src="docs/demo/route-overview.png" width="300" alt="Howe Sound Crest Trail route map and elevation profile">
-  <img src="docs/demo/recorded-metrics.png" width="300" alt="Recorded hike metrics">
+  <img src="docs/demo/screenshots/01-home.png" width="300" alt="Hike history with Howe Sound Crest Trail and Marriott Basin Trail">
+  <img src="docs/demo/screenshots/02-map.png" width="300" alt="Saved hikes on the all-hikes map">
 </p>
+
+**Hike details and context calendar**
+
 <p>
-  <img src="docs/demo/questionnaire-pace.png" width="300" alt="Personal pace and backpack questionnaire; companion details withheld">
-  <img src="docs/demo/questionnaire-ratings.png" width="300" alt="Personal effort and route difficulty ratings">
+  <img src="docs/demo/screenshots/03-hike.png" width="300" alt="Hike route, elevation profile and recorded metrics">
+  <img src="docs/demo/screenshots/04-calendar.png" width="300" alt="September calendar with the Howe Sound Crest Trail hike">
 </p>
+
+**Calendar filters and personal ratings**
+
 <p>
-  <img src="docs/demo/sleep-and-recovery.png" width="300" alt="Sleep duration, quality, and feeling rested">
-  <img src="docs/demo/weather-conditions.png" width="300" alt="Weather and weather-related discomfort questionnaire">
+  <img src="docs/demo/screenshots/05-calendar-filters.png" width="300" alt="Calendar display filters for hikes and personal-context categories">
+  <img src="docs/demo/screenshots/06-questionnaire.png" width="300" alt="Post-hike questionnaire and personal ratings">
 </p>
+
+**Mayushi analysis and trim preview**
+
 <p>
-  <img src="docs/demo/analysis-overview.png" width="300" alt="Imported English AI analysis displayed inside TrailSense">
-  <img src="docs/demo/analysis-reading.png" width="300" alt="Continuation of the imported English hike analysis">
+  <img src="docs/demo/screenshots/07-analysis.png" width="300" alt="Imported Mayushi analysis displayed in the app">
+  <img src="docs/demo/screenshots/08-trim.png" width="300" alt="Track trimming preview with the retained section selected">
 </p>
+
+**Missing-start recovery**
+
+<p>
+  <img src="docs/demo/screenshots/09-recovery.png" width="300" alt="Missing-start recovery with recorded and estimated track sections">
+</p>
+
+Recorded and estimated track sections are shown separately in the recovery example.
 
 ## Track correction
 
