@@ -187,6 +187,8 @@ Recordings and questionnaires are stored locally. Requests sent to Mayushi conta
 
 This demonstration uses my Howe Sound Crest Trail recording, questionnaire and analysis, plus Marriott Basin Trail for track correction and the two-hike map. It excludes information about companions and other people, unrelated calendar entries, app databases, keys, and diagnostic reports.
 
-## License
+## Copyright and permitted use
 
-A license has not yet been selected for this project.
+Copyright (c) 2026 Kseniia Sterkhova. All rights reserved.
+
+Public for viewing and review, not open-source. No permission to modify, reuse, or redistribute the original project is granted except as required by law, GitHub's Terms of Service, or separate written authorization. GitHub's platform viewing and forking rights and third-party licenses remain unaffected. See [LICENSE](LICENSE).
