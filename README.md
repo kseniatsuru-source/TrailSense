@@ -12,7 +12,7 @@ The project's main goal is to use that history to predict how long a future hike
 
 The examples use my real Howe Sound Crest Trail hike, recorded with a HUAWEI WATCH GT 4, and my Marriott Basin Trail recording for track correction and the two-hike map. The screenshots and video use an isolated **English demo version. The current app is in Russian.**
 
-This repository contains the **0.4.1** Russian-language application. The demo was recorded from an isolated English version of the same development build.
+The downloadable application is **TrailSense QA 0.4.3, build 28**. The screenshots and video below show the earlier **0.4.1** development build in an isolated English demo version.
 
 ### Animated preview
 
@@ -150,36 +150,15 @@ GPS recording import supports GPX and TCX. **Testing has been limited to HUAWEI 
 
 This is a personal prototype under active development.
 
-## Build locally
+## Download and install
 
-Requirements:
+[Download TrailSense QA 0.4.3 build 28](https://github.com/kseniatsuru-source/TrailSense/releases/download/v0.4.3-qa28/TrailSense-QA-0.4.3-build28.apk) · [Release notes](https://github.com/kseniatsuru-source/TrailSense/releases/tag/v0.4.3-qa28)
 
-- JDK 17 with `JAVA_HOME` configured.
-- Android SDK Platform 35 and the SDK build tools requested by Gradle.
-- Android API 28 or later on a device or emulator.
-- Network access to download dependencies.
+Requires Android 9 (API 28) or later. Download the APK to an Android device and open it to install. Android may ask you to allow installation from the browser or file manager you used.
 
-Open the project in Android Studio, or configure the SDK through `ANDROID_HOME` or an untracked `local.properties` file containing `sdk.dir`.
+This is a debug-signed **QA prerelease** of the prototype. Its package is `com.mayushi.trailsense.qa043`, labelled **TrailSense QA**. It installs separately from the original TrailSense application; existing production data is not migrated automatically. To update an existing compatible TrailSense QA installation, install over it without uninstalling first.
 
-```sh
-git clone https://github.com/kseniatsuru-source/TrailSense.git
-cd TrailSense
-./gradlew assembleDebug
-```
-
-The debug APK is created in `app/build/outputs/apk/debug/`.
-
-### Tests
-
-```sh
-./gradlew testDebugUnitTest
-```
-
-The project includes JUnit/Robolectric tests and Android instrumented tests. Some local acceptance checks require personal test data or a device with a populated database.
-
-### Build signing
-
-The release variant currently uses debug signing for checks on a personal device. Configure your own release signing before distribution. A build signed with a different key cannot update an installed app signed with the original key.
+Acceptance checks are incomplete for calendar entry with the on-screen keyboard and saving and reopening the overall exertion rating. Review the release notes before trying the app. This public repository provides the product presentation, demo media and APK downloads. Application source code and its Git history are kept in a private repository.
 
 ## Data and privacy
 
